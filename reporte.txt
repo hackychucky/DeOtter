@@ -1,0 +1,4 @@
+Hello, this is DeOtter, the DeObfuscation tool for Cyber Security Analysts - Developed with ❤ from Spain by @HackyChucky
+·HEX encoding detected on file testfile.txt:
+ 36.36% of the content of file testfile.txt is obfuscated using HEX encoding.
+
