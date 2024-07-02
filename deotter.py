@@ -69,11 +69,11 @@ def deobfuscate(filename):
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Programa para desofuscar código JavaScript ofuscado")
-    # Añadir argumento -r/--report para especificar el archivo
-    parser.add_argument("-r", "--report", help="Generar un reporte de código hexadecimal en el archivo especificado", required=False)
-    parser.add_argument("-d", "--deobfuscate", help="Desofuscar código hexadecimal en el archivo especificado", required=False)
-    parser.add_argument("output_file", nargs='?', help="Archivo de salida para el resultado desofuscado")
+    parser = argparse.ArgumentParser(description="DeObfuscation tool for Cyber Security Analysts - Developed with ❤ from Spain by @HackyChucky")
+    # Add argument -r/--report to specify the file
+    parser.add_argument("-r", "--report", help="Generate a report with an Obfuscation Analysis of a given file", required=False)
+    parser.add_argument("-d", "--deobfuscate", help="Deobfuscate code from the specified file", required=False)
+    parser.add_argument("output_file", nargs='?', help="Output file for deobfuscation result")
 
 
     args = parser.parse_args()  # Parses commandline arguments
