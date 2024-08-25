@@ -9,7 +9,7 @@ import sys      # To check if the stdoutput is being passed to the report file
 
 # FUNCTION THAT SEARCHES FOR HEXADECIMAL CODE
 
-def find_hex(content):
+def find_hex_obfuscation(content):
     pattern = r'\\x[0-9a-fA-F]{2}'  # Pattern to find hexadecimal sequences like \x## (## are hexadecimal digits)
     hex_matches = re.findall(pattern, content) # Finds all matches of the pattern in the content
     hex_length = sum(len(match) for match in hex_matches) # Calculates the total length of the hexadecimal strings found
@@ -31,7 +31,7 @@ def gen_report(filename):
     try:
         with open(filename, 'r') as file:
             content = file.read() # Reads the entire content of the specified file
-            hex_data = find_hex(content) # Executes find_hex function to find hexadecimals in the content
+            hex_data = find_hex_obfuscation(content) # Executes find_hex_obfuscation function to find hexadecimals in the content
             if hex_data["matches"]:
                 report = f"·HEX encoding detected on file {filename}:\n"
                 # Uncomment next line for showing HEX matches on report
@@ -53,7 +53,7 @@ def deobfuscate(filename):
     try:
         with open(filename, 'r') as file:
             content = file.read() # Reads the entire content of the specified file
-            hex_data = find_hex(content) # Executes find_hex function to find hexadecimals in the content
+            hex_data = find_hex_obfuscation(content) # Executes find_hex_obfuscation function to find hexadecimals in the content
             if hex_data["matches"]:
                 deobfuscated_content = content
                 for match in hex_data["matches"]:
