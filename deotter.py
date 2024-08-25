@@ -5,6 +5,7 @@ print ('Hello, this is DeOtter, the DeObfuscation tool for Cyber Security Analys
 import argparse # Library for interacting with arguments through commands
 import re       # Regular expressions library
 import sys      # To check if the stdoutput is being passed to the report file
+import base64   # To be able to work with b64 encoding/decoding
 
 
 # FUNCTION THAT SEARCHES FOR HEXADECIMAL CODE
@@ -24,46 +25,89 @@ def find_hex_obfuscation(content):
         "hex_length": hex_length
     }
 
+# FUNCTION THAT SEARCHES FOR BASE64 CODE
+def find_base64_obfuscation(content):
+    # Pattern to find potential base64 sequences (strings of length divisible by 4, padded with '=')
+    # A general pattern that matches strings with a length multiple of 4, using common base64 characters
+    pattern = r'(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?'
+    base64_matches = re.findall(pattern, content)  # Finds all matches of the pattern in the content
+
+    # Filter out non-base64 valid strings (since the regex might be too broad)
+    valid_base64_matches = [match for match in base64_matches if len(match) % 4 == 0]
+    valid_base64_matches = [match for match in valid_base64_matches if len(match) >= 8]  # Only consider matches of 8+ characters
+
+    base64_length = sum(len(match) for match in valid_base64_matches)  # Calculates the total length of the base64 strings found
+    content_length = len(content)  # Calculates the total length of the file content
+    base64_percentage = (base64_length / content_length) * 100 if content_length > 0 else 0  # Calculates the percentage
+
+    # Returns the matches, the percentage, the total length, and the length of the detected characters
+    return {
+        "matches": valid_base64_matches,
+        "percentage": base64_percentage,
+        "total_length": content_length,
+        "base64_length": base64_length
+    }
+
 
 # FUNCTION THAT GENERATES REPORT
-
 def gen_report(filename):
     try:
         with open(filename, 'r') as file:
-            content = file.read() # Reads the entire content of the specified file
-            hex_data = find_hex_obfuscation(content) # Executes find_hex_obfuscation function to find hexadecimals in the content
+            content = file.read()  # Reads the entire content of the specified file
+
+            # HEX analysis
+            hex_data = find_hex_obfuscation(content)  # Executes find_hex_obfuscation function to find hexadecimals in the content
+            report = ""
             if hex_data["matches"]:
-                report = f"·HEX encoding detected on file {filename}:\n"
-                # Uncomment next line for showing HEX matches on report
-                # report += "\n".join(hex_data["matches"]) + "\n"
+                report += f"·HEX encoding detected on file {filename}:\n"
                 report += f" {hex_data['percentage']:.2f}% of the content of file {filename} is obfuscated using HEX encoding.\n"
             else:
-                report = f"No HEX encoding detected on file {filename}.\n"
+                report += f"No HEX encoding detected on file {filename}.\n"
+
+            # BASE64 analysis
+            base64_data = find_base64_obfuscation(content)  # Executes find_base64_obfuscation function to find base64 in the content
+            if base64_data["matches"]:
+                report += f"\n·Base64 encoding detected on file {filename}:\n"
+                report += f" {base64_data['percentage']:.2f}% of the content of file {filename} is obfuscated using Base64 encoding.\n"
+            else:
+                report += f"No Base64 encoding detected on file {filename}.\n"
+
             # Print report to stdout
-            print(report) # Prints the report to standard output (console)
-            return report # Returns the generated report
+            print(report)  # Prints the report to standard output (console)
+            return report  # Returns the generated report
     except FileNotFoundError:
         error_message = f"File {filename} not found. Please verify filename and filepath.\n"
-        print(error_message) # Prints error message if the file is not found
-        return error_message # Returns error message
+        print(error_message)  # Prints error message if the file is not found
+        return error_message  # Returns error message
     
 
-# FUNCTION THAT DEOBFUSCATES HEXADECIMAL CODE
+# FUNCTION THAT DEOBFUSCATES CODE (HEX, BASE64,)
 def deobfuscate(filename):
     try:
         with open(filename, 'r') as file:
-            content = file.read() # Reads the entire content of the specified file
-            hex_data = find_hex_obfuscation(content) # Executes find_hex_obfuscation function to find hexadecimals in the content
+            content = file.read()  # Reads the entire content of the specified file
+
+            # HEX deobfuscation
+            hex_data = find_hex_obfuscation(content)  # Executes find_hex_obfuscation function to find hexadecimals in the content
             if hex_data["matches"]:
-                deobfuscated_content = content
                 for match in hex_data["matches"]:
                     # Convert each hex match to a character
-                    hex_value = match.replace("\\x", "") # Removes the \x prefix from the hexadecimal sequence
-                    char = bytes.fromhex(hex_value).decode('utf-8') # Converts the hexadecimal sequence into a character
-                    deobfuscated_content = deobfuscated_content.replace(match, char) # Replaces the hexadecimal sequence with the corresponding character
-                return deobfuscated_content # Returns the deobfuscated content
-            else:
-                return f"No HEX encoding deobfuscation was detected{filename}."
+                    hex_value = match.replace("\\x", "")  # Removes the \x prefix from the hexadecimal sequence
+                    char = bytes.fromhex(hex_value).decode('utf-8')  # Converts the hexadecimal sequence into a character
+                    content = content.replace(match, char)  # Replaces the hexadecimal sequence with the corresponding character
+
+            # BASE64 deobfuscation
+            base64_data = find_base64_obfuscation(content)  # Executes find_base64_obfuscation function to find base64 in the content
+            if base64_data["matches"]:
+                for match in base64_data["matches"]:
+                    try:
+                        decoded = base64.b64decode(match).decode('utf-8')  # Attempts to decode the base64 sequence
+                        content = content.replace(match, decoded)  # Replaces the base64 sequence with the decoded content
+                    except Exception as e:
+                        print(f"Failed to decode base64 sequence: {match}, Error: {e}")
+                        continue  # If an error occurs during decoding, skip the current match
+
+            return content  # Returns the deobfuscated content
     except FileNotFoundError:
         return f"File {filename} not found. Please, verify filename and filepath."
 
