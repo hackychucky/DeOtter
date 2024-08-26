@@ -26,6 +26,7 @@ def find_hex_obfuscation(content):
     }
 
 # FUNCTION THAT SEARCHES FOR BASE64 CODE
+
 def find_base64_obfuscation(content):
     # Pattern to find potential base64 sequences (strings of length divisible by 4, padded with '=')
     # A general pattern that matches strings with a length multiple of 4, using common base64 characters
@@ -49,6 +50,39 @@ def find_base64_obfuscation(content):
     }
 
 
+# FUNCTION THAT SEARCHES FOR STRING ARRAY MAPPING
+def find_string_array_mapping(content):
+    pattern = r'var\s+([a-zA-Z_$][0-9a-zA-Z_$]*)\s*=\s*(\[.*?\]|\'.*?\'|\".*?\");'  # Pattern to detect "var [variableName] = [string/array]"
+    var_matches = re.findall(pattern, content)  # Finds all matches of the pattern in the content
+
+    # Returns the matches and the count of string array mapping techniques detected
+    return {
+        "matches": var_matches,
+        "count": len(var_matches)
+    }
+
+# FUNCTION THAT SEARCHES FOR DEAD CODE
+def find_dead_code(content):
+    # Detect unused variables
+    unused_vars = re.findall(r'var\s+([a-zA-Z_$][0-9a-zA-Z_$]*)\s*=', content)
+    used_vars = re.findall(r'\b([a-zA-Z_$][0-9a-zA-Z_$]*)\b', content)
+    unused_vars = [var for var in unused_vars if var not in used_vars]
+
+    # Detect unused functions
+    function_defs = re.findall(r'function\s+([a-zA-Z_$][0-9a-zA-Z_$]*)\s*\(', content)
+    function_calls = re.findall(r'\b([a-zA-Z_$][0-9a-zA-Z_$]*)\s*\(', content)
+    unused_functions = [func for func in function_defs if func not in function_calls]
+
+    # Detect unreachable code blocks (basic example, more complex analysis may be needed)
+    unreachable_code_blocks = re.findall(r'if\s*\(false\)\s*\{.*?\}', content, re.DOTALL)
+
+    return {
+        "unused_vars": unused_vars,
+        "unused_functions": unused_functions,
+        "unreachable_code_blocks": unreachable_code_blocks,
+        "count": len(unused_vars) + len(unused_functions) + len(unreachable_code_blocks)
+    }
+
 # FUNCTION THAT GENERATES REPORT
 def gen_report(filename):
     try:
@@ -57,6 +91,8 @@ def gen_report(filename):
 
             # HEX analysis
             hex_data = find_hex_obfuscation(content)  # Executes find_hex_obfuscation function to find hexadecimals in the content
+            base64_data = find_base64_obfuscation(content)  # Executes find_base64_obfuscation function to find Base64 in the content
+            string_array_data = find_string_array_mapping(content)  # Executes find_string_array_mapping function to detect string array mappings
             report = ""
             if hex_data["matches"]:
                 report += f"·HEX encoding detected on file {filename}:\n"
@@ -72,16 +108,41 @@ def gen_report(filename):
             else:
                 report += f"No Base64 encoding detected on file {filename}.\n"
 
+            # String Array Mapping Analysis
+            if string_array_data["count"] > 0:
+                report += f"· String array mapping technique detected {string_array_data['count']} times:\n"
+                for match in string_array_data["matches"]:
+                    report += f"  var {match[0]} = {match[1]};\n"
+            else:
+                report += "· No string array mapping technique detected.\n"
+
+            # Dead code detection report
+            dead_code_data = find_dead_code(content)
+            if dead_code_data["count"] > 0:
+                report += f"·Dead code detected:\n"
+                if dead_code_data["unused_vars"]:
+                    report += f"  Unused variables: {', '.join(dead_code_data['unused_vars'])}\n"
+                if dead_code_data["unused_functions"]:
+                    report += f"  Unused functions: {', '.join(dead_code_data['unused_functions'])}\n"
+                if dead_code_data["unreachable_code_blocks"]:
+                    report += f"  Unreachable code blocks detected ({len(dead_code_data['unreachable_code_blocks'])}):\n"
+                    for block in dead_code_data["unreachable_code_blocks"]:
+                        report += f"    {block}\n"
+            else:
+                report += f"No dead code detected on file {filename}.\n"
+
+
             # Print report to stdout
             print(report)  # Prints the report to standard output (console)
             return report  # Returns the generated report
+        
     except FileNotFoundError:
         error_message = f"File {filename} not found. Please verify filename and filepath.\n"
         print(error_message)  # Prints error message if the file is not found
         return error_message  # Returns error message
     
 
-# FUNCTION THAT DEOBFUSCATES CODE (HEX, BASE64,)
+# FUNCTION THAT DEOBFUSCATES CODE (HEX, BASE64, String Array Mapping,)
 def deobfuscate(filename):
     try:
         with open(filename, 'r') as file:
@@ -107,10 +168,37 @@ def deobfuscate(filename):
                         print(f"Failed to decode base64 sequence: {match}, Error: {e}")
                         continue  # If an error occurs during decoding, skip the current match
 
+            # String Array Mapping deobfuscation
+            string_array_data = find_string_array_mapping(content)
+            if string_array_data["matches"]:
+                var_dict = {}
+                for var_name, var_value in string_array_data["matches"]:
+                    # Process the value of the array or string
+                    if var_value.startswith("[") and var_value.endswith("]"):
+                        # Handle the case of an array
+                        elements = re.findall(r'\"(.*?)\"|\'.*?\'', var_value)  # Extracts the elements of the array
+                        var_dict[var_name] = elements
+                    else:
+                        # Handle the case of a single string
+                        var_dict[var_name] = var_value.strip('\'"')
+
+                # Replace variable references with their values
+                for var_name, var_value in var_dict.items():
+                    if isinstance(var_value, list):
+                        # Replace array accesses like x[0], x[1]
+                        for i, item in enumerate(var_value):
+                            content = re.sub(rf'\b{re.escape(var_name)}\[{i}\]\b', item, content)
+                    else:
+                        # Replace the variable directly if it's a string
+                        content = re.sub(rf'\b{re.escape(var_name)}\b', var_value, content)
+
+
             return content  # Returns the deobfuscated content
     except FileNotFoundError:
         return f"File {filename} not found. Please, verify filename and filepath."
+    
 
+# MAIN FUNCTION
 
 def main():
     parser = argparse.ArgumentParser(description="DeObfuscation tool for Cyber Security Analysts - Developed with ❤ from Spain by @HackyChucky")
