@@ -1,0 +1,7 @@
+// Obfuscated Variable Names Example
+
+var a1 = 10;
+var b2 = 20;
+var c3 = a1 + b2;
+
+console.log(c3); // Output: 30

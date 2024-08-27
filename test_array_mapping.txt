@@ -1,0 +1,7 @@
+// String Array Mapping Example
+
+var strings = ["Hello", "World"];
+var msg1 = strings[0]; // "Hello"
+var msg2 = strings[1]; // "World"
+
+console.log(msg1 + " " + msg2); // Output: Hello World

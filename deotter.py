@@ -219,7 +219,7 @@ def find_dynamic_code_generation(content):
     possible_cc_servers = re.findall(r'http[s]?://[^\s\'"<>]+', content, re.IGNORECASE)
     
     # Filter potentially malicious URLs
-    malicious_urls = [url for url in possible_cc_servers if any(keyword in url for keyword in ['malicious', 'exploit', 'c2', 'attack', 'hacker'])]
+    malicious_urls = [url for url in possible_cc_servers if any(keyword in url for keyword in ['malicious', 'exploit', 'c2', 'attack', 'hacker', '.ru', '.xyz'])]
 
     return {
         "dynamic_code_matches": matches,

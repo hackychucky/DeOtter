@@ -1,0 +1,17 @@
+// Dead Code Insertion Example
+
+// Unused variables
+var unused1 = "This is unused";
+var unused2 = 12345;
+
+// Unused functions
+function unusedFunction() {
+    console.log("This function is not used");
+}
+
+// Unreachable code block
+if (false) {
+    console.log("This code will never run");
+}
+
+console.log("This code runs"); // Output: This code runs

