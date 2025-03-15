@@ -32,3 +32,4 @@
 # https://github.com/hackychucky
 # https://x.com/HackyChucky
 
+# Powered by AI soon! 
