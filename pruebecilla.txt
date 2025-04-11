@@ -1,0 +1,379 @@
+Hello, this is DeOtter, the DeObfuscation tool for Cyber Security Analysts - Developed with ❤ from Spain by @HackyChucky
+· HEX encoding detected in file testfile.txt:
+ 7.30% of the content is obfuscated using HEX encoding.
+
+· Base64 encoding detected in file testfile.txt:
+ 21.23% of the content is obfuscated using Base64 encoding.
+
+· String array mapping technique detected 15 times:
+  - a = "Hello, ";
+  - b = "World!";
+  - c = [1, 2, 3, 4, 5];
+  - d = "How are you?";
+  - e = ["JavaScript", "Python", "C++"];
+  - activeVar = "I am used";
+  - unusedVar = "I am never used";
+  - deadVar = "I am a dead variable";
+  - databaseUrl = "https://database.example.com";
+  - apiKey = "abcdef123456";
+  - jdfhjdhf = "This is an obfuscated string.";
+  - qwero = [100, 200, 300, 400, 500];
+  - zxcvbn = "Another example of obfuscated text.";
+  - asdfgh = ["Alpha", "Beta", "Gamma"];
+  - label = "start";
+
+· Dead code detected:
+  Unreachable code blocks (3):
+    if (false) {
+    var deadVar = "I am a dead variable";
+    console.log(deadVar);
+}
+    if (false) {
+    function deadFunction() {
+        console.log("I am a dead function.");
+    }
+    if (false) {
+        console.log("This will never execute.");
+    }
+
+· Obfuscated variable names detected 20 times:
+  - lkjsdf: 56789
+  - zxcvbn: Another example of obfuscated text.
+  - apiKey: abcdef123456
+  - databaseUrl: https://database.example.com
+  - b: World!
+  - asdfgh: ["Alpha", "Beta", "Gamma"]
+  - timeoutDuration: 3000
+  - k: 0
+  - jdfhjdhf: This is an obfuscated string.
+  - c: [1, 2, 3, 4, 5]
+  - qwero: [100, 200, 300, 400, 500]
+  - e: ["JavaScript", "Python", "C++"]
+  - i: 0
+  - deadVar: I am a dead variable
+  - label: start
+  - d: How are you?
+  - unusedVar: I am never used
+  - a: Hello, 
+  - j: 0
+  - activeVar: I am used
+· Control flow obfuscation detected 4 times:
+  - if (true) {
+    activeFunction();  // This function call is active
+    console.log(activeVar);  // This variable is used
+}
+
+// Dead code
+if (false) {
+    var deadVar = "I am a dead variable";
+    console.log(deadVar);
+}
+
+if (false) {
+    function deadFunction() {
+        console.log("I am a dead function.");
+    }
+    deadFunction();
+}
+
+// More code execution
+console.log("This part of the code is active.");
+
+
+# TEST CODE FOR VARIABLE NAME OBFUSCATION
+
+// Variables with descriptive names
+var databaseUrl = "https://database.example.com";
+var apiKey = "abcdef123456";
+var timeoutDuration = 3000;
+
+// Variables with obfuscated names
+var jdfhjdhf = "This is an obfuscated string.";
+var lkjsdf = 56789;
+var qwero = [100, 200, 300, 400, 500];
+var zxcvbn = "Another example of obfuscated text.";
+var asdfgh = ["Alpha", "Beta", "Gamma"];
+
+// Function that uses both types of variables
+function showConnectionDetails() {
+    console.log("Database URL: " + databaseUrl);
+    console.log("API Key: " + apiKey);
+    console.log("Timeout Duration: " + timeoutDuration);
+}
+
+// Function with obfuscated names
+function processObfuscatedData() {
+    console.log(jdfhjdhf);  // Using obfuscated variable
+    console.log(lkjsdf);  // Using obfuscated variable
+    console.log("Number List: " + qwero.join(", "));  // Using obfuscated variable
+    console.log(zxcvbn);  // Using obfuscated variable
+    console.log("Elements: " + asdfgh.join(", "));  // Using obfuscated variable
+}
+
+// Execute functions
+showConnectionDetails();
+processObfuscatedData();
+
+
+
+# TEST CODE FOR CONTROL FLOW OBFUSCATION / SPAGUETTI CODE
+
+// Complex nested conditionals
+if (true) {
+    if (false) {
+        console.log("This will never execute.");
+    } else {
+        if (true) {
+            console.log("This will always execute.");
+            if (Math.random() > 0.5) {
+                console.log("Random condition met.");
+            } else {
+                console.log("Random condition not met.");
+            }
+        }
+    }
+}
+
+// Nested loops with unnecessary complexity
+for (var i = 0; i < 5; i++) {
+    while (i < 3) {
+        for (var j = 0; j < 2; j++) {
+            console.log("Nested loop iteration: i = " + i + ", j = " + j);
+            if (j === 1) {
+                break; // Breaks inner loop only
+            }
+        }
+        if (i === 2) {
+            continue; // Continues outer loop
+        }
+    }
+}
+
+// Unusual use of break and continue
+function processNumbers() {
+    for (var i = 0; i < 10; i++) {
+        if (i === 5) {
+            break; // Exits the loop
+        }
+        if (i % 2 === 0) {
+            continue; // Skips the iteration
+        }
+        console.log("Processing number: " + i);
+    }
+}
+
+processNumbers();
+
+// Unnecessary use of goto-like logic using labels (simulated with JavaScript)
+var label = "start";
+outer_loop:
+for (var i = 0; i < 3; i++) {
+    console.log("Outer loop iteration: " + i);
+    inner_loop:
+    for (var j = 0; j < 3; j++) {
+        if (i === 1 && j === 1) {
+            break outer_loop; // Exits outer loop
+        }
+        console.log("  Inner loop iteration: " + j);
+    }
+}
+
+// More complex control flow with nested functions
+function outerFunction() {
+    function innerFunction() {
+        for (var k = 0; k < 3; k++) {
+            if (k === 2) {
+                return; // Exits inner function
+            }
+  - for (var i = 0; i < 5; i++) {
+    while (i < 3) {
+        for (var j = 0; j < 2; j++) {
+            console.log("Nested loop iteration: i = " + i + ", j = " + j);
+            if (j === 1) {
+                break; // Breaks inner loop only
+            }
+        }
+        if (i === 2) {
+            continue; // Continues outer loop
+        }
+    }
+}
+
+// Unusual use of break and continue
+function processNumbers() {
+    for (var i = 0; i < 10; i++) {
+        if (i === 5) {
+            break; // Exits the loop
+        }
+        if (i % 2 === 0) {
+            continue; // Skips the iteration
+        }
+        console.log("Processing number: " + i);
+    }
+}
+
+processNumbers();
+
+// Unnecessary use of goto-like logic using labels (simulated with JavaScript)
+var label = "start";
+outer_loop:
+for (var i = 0; i < 3; i++) {
+    console.log("Outer loop iteration: " + i);
+    inner_loop:
+    for (var j = 0; j < 3; j++) {
+        if (i === 1 && j === 1) {
+            break outer_loop; // Exits outer loop
+        }
+        console.log("  Inner loop iteration: " + j);
+    }
+}
+
+// More complex control flow with nested functions
+function outerFunction() {
+    function innerFunction() {
+        for (var k = 0; k < 3; k++) {
+            if (k === 2) {
+                return; // Exits inner function
+            }
+  - function activeFunction() {
+    console.log("This function is called.");
+}
+
+function unusedFunction() {
+    console.log("This function is never called.");
+}
+
+// Code execution
+if (true) {
+    activeFunction();  // This function call is active
+    console.log(activeVar);  // This variable is used
+}
+
+// Dead code
+if (false) {
+    var deadVar = "I am a dead variable";
+    console.log(deadVar);
+}
+
+if (false) {
+    function deadFunction() {
+        console.log("I am a dead function.");
+    }
+    deadFunction();
+}
+
+// More code execution
+console.log("This part of the code is active.");
+
+
+# TEST CODE FOR VARIABLE NAME OBFUSCATION
+
+// Variables with descriptive names
+var databaseUrl = "https://database.example.com";
+var apiKey = "abcdef123456";
+var timeoutDuration = 3000;
+
+// Variables with obfuscated names
+var jdfhjdhf = "This is an obfuscated string.";
+var lkjsdf = 56789;
+var qwero = [100, 200, 300, 400, 500];
+var zxcvbn = "Another example of obfuscated text.";
+var asdfgh = ["Alpha", "Beta", "Gamma"];
+
+// Function that uses both types of variables
+function showConnectionDetails() {
+    console.log("Database URL: " + databaseUrl);
+    console.log("API Key: " + apiKey);
+    console.log("Timeout Duration: " + timeoutDuration);
+}
+
+// Function with obfuscated names
+function processObfuscatedData() {
+    console.log(jdfhjdhf);  // Using obfuscated variable
+    console.log(lkjsdf);  // Using obfuscated variable
+    console.log("Number List: " + qwero.join(", "));  // Using obfuscated variable
+    console.log(zxcvbn);  // Using obfuscated variable
+    console.log("Elements: " + asdfgh.join(", "));  // Using obfuscated variable
+}
+
+// Execute functions
+showConnectionDetails();
+processObfuscatedData();
+
+
+
+# TEST CODE FOR CONTROL FLOW OBFUSCATION / SPAGUETTI CODE
+
+// Complex nested conditionals
+if (true) {
+    if (false) {
+        console.log("This will never execute.");
+    } else {
+        if (true) {
+            console.log("This will always execute.");
+            if (Math.random() > 0.5) {
+                console.log("Random condition met.");
+            } else {
+                console.log("Random condition not met.");
+            }
+        }
+    }
+}
+
+// Nested loops with unnecessary complexity
+for (var i = 0; i < 5; i++) {
+    while (i < 3) {
+        for (var j = 0; j < 2; j++) {
+            console.log("Nested loop iteration: i = " + i + ", j = " + j);
+            if (j === 1) {
+                break; // Breaks inner loop only
+            }
+        }
+        if (i === 2) {
+            continue; // Continues outer loop
+        }
+    }
+}
+
+// Unusual use of break and continue
+function processNumbers() {
+    for (var i = 0; i < 10; i++) {
+        if (i === 5) {
+            break; // Exits the loop
+        }
+        if (i % 2 === 0) {
+            continue; // Skips the iteration
+        }
+        console.log("Processing number: " + i);
+    }
+}
+
+processNumbers();
+
+// Unnecessary use of goto-like logic using labels (simulated with JavaScript)
+var label = "start";
+outer_loop:
+for (var i = 0; i < 3; i++) {
+    console.log("Outer loop iteration: " + i);
+    inner_loop:
+    for (var j = 0; j < 3; j++) {
+        if (i === 1 && j === 1) {
+            break outer_loop; // Exits outer loop
+        }
+        console.log("  Inner loop iteration: " + j);
+    }
+}
+
+// More complex control flow with nested functions
+function outerFunction() {
+    function innerFunction() {
+        for (var k = 0; k < 3; k++) {
+            if (k === 2) {
+                return; // Exits inner function
+            }
+  - continue
+function processNumbers() {
+    for (var i = 0; i < 10; i++) {
+        if (i === 5) {
+            break;
+

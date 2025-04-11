@@ -44,3 +44,6 @@ eval(dynamicCode);
 
 var calc = 5 + 10 * (2 - 1) / 3;
 console.log(calc);
+
+http://www.cancer.com
+http://www.sida.com

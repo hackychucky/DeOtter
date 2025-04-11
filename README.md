@@ -1,35 +1,55 @@
 # DeOtter
 
+![DeOtter logo](images/deotterlogo.png)
 
+**Hello, this is DeOtter**, the DeObfuscation tool for Cyber Security Analysts.  
+Developed with ❤️ from Spain by [@HackyChucky](https://github.com/hackychucky)
 
-# ____        ___  _   _            
-# |  _ \  ___ / _ \| |_| |_ ___ _ __ 
-# | | | |/ _ \ | | | __| __/ _ \ '__|
-# | |_| |  __/ |_| | |_| ||  __/ |   
-# |____/ \___|\___/ \__|\__\___|_|   
+---
 
+## 🚀 Quick Guide for Easy Usage
 
-# Hello, this is DeOtter, the DeObfuscation tool for Cyber Security Analysts - Developed with ❤ from Spain by @HackyChucky'
+### 🔍 Generate an Obfuscation Analysis Report
 
-# This is a guide for a easy usage of DeOtter:
+```bash
+python3 deotter.py -r [filename.txt]
+```
 
-# To generate a obfuscation analysis report, the structure is the following:
-# python3 deotter.py -r [filename.txt] 
+➡️ To save the result into a new file:
 
-# If you want to dump the result into a new file, do:
-# python3 deotter.py -r [filename.txt] > [newfile.txt]
+```bash
+python3 deotter.py -r [filename.txt] > [newfile.txt]
+```
 
-# To deobfuscate a file, the structure is the following:
-# python3 deotter.py -d [filename.txt]
+---
 
-# If you want to dump the result into a new file, do:
-# python3 deotter.py -d [filename.txt] > [newfile.txt]
+### 🔓 Deobfuscate a File
 
+```bash
+python3 deotter.py -d [filename.txt]
+```
 
-# Easy as that. Enjoy! 
+➡️ To save the result into a new file:
 
-# For any suggestions or problems contact the author via Github or Twitter/X:
-# https://github.com/hackychucky
-# https://x.com/HackyChucky
+```bash
+python3 deotter.py -d [filename.txt] > [newfile.txt]
+```
 
+<<<<<<< HEAD
 # Powered by AI soon! 
+=======
+---
+
+## 🎉 Easy as that. Enjoy!
+
+## 📬 Contact
+
+For suggestions or issues, reach out via:
+
+- GitHub: [hackychucky](https://github.com/hackychucky)  
+- Twitter/X: [@HackyChucky](https://x.com/HackyChucky)
+
+---
+
+**🧠 Powered by AI soon!**
+>>>>>>> b4ed3ef (readmeupdate)

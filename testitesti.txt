@@ -1,0 +1,43 @@
+Hello, this is DeOtter, the DeObfuscation tool for Cyber Security Analysts - Developed with ❤ from Spain by @HackyChucky
+· HEX encoding detected in file testfile2.txt:
+ 2.05% of the content is obfuscated using HEX encoding.
+
+· Base64 encoding detected in file testfile2.txt:
+ 9.42% of the content is obfuscated using Base64 encoding.
+
+· String array mapping technique detected 5 times:
+  - unusedVar = "This is dead code";
+  - deadCode = "This code is never executed";
+  - anotherUnused = "Also dead code";
+  - arr = ["item1", "item2", "item3"];
+  - dynamicCode = "console.log('Dynamic execution');";
+
+· Dead code detected:
+  Unreachable code blocks (1):
+    if (false) {
+    var deadCode = "This code is never executed";
+    var anotherUnused = "Also dead code";
+}
+
+· Obfuscated variable names detected 10 times:
+  - arr: ["item1", "item2", "item3"]
+  - calc: 5 + 10 * (2 - 1) / 3
+  - y: 20
+  - b: 10
+  - deadCode: This code is never executed
+  - anotherUnused: Also dead code
+  - x: 10
+  - i: 0
+  - a: 5
+  - unusedVar: This is dead code
+· Control flow obfuscation detected 1 times:
+  - Line 6
+No arithmetic obfuscation detected.
+· Minification detected:
+  Original content length: 977 characters
+  Minified content length: 647 characters
+  Whitespace reduction ratio: 1.00
+· Dynamic code generation detected:
+  - dynamicCode
+No possible C&C server addresses detected.
+
