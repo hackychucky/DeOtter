@@ -36,7 +36,7 @@ python3 deotter.py -d [filename.txt] > [newfile.txt]
 ```
 
 <<<<<<< HEAD
-# Powered by AI soon! 
+# Powered by AI sooner than expected! 
 =======
 ---
 
