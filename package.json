@@ -1,0 +1,14 @@
+{
+    "name": "deotter-root",
+    "version": "1.0.0",
+    "private": true,
+    "scripts": {
+      "start": "concurrently \"npm run server\" \"npm run client\"",
+      "server": "cd backend && python3 app.py",
+      "client": "cd frontend && npm start"
+    },
+    "devDependencies": {
+      "concurrently": "^7.0.0"
+    }
+  }
+  

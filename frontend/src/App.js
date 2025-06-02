@@ -8,11 +8,42 @@ import './App.css';
 
 function App() {
   const [code, setCode] = useState('');
+  // State for report:
+  const [report, setReport] = useState('');
+
 
   // función para aplicar resaltado con prism
   const highlight = (code) => {
     return Prism.highlight(code, Prism.languages.javascript, 'javascript');
   };
+
+  // lo que meto
+  const handleGenerateReport = async () => {
+    try {
+      const response = await fetch('http://127.0.0.1:5000/generate-report', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ code }),
+      });
+  
+      const data = await response.json();
+  
+      if (response.ok) {
+        setReport(data.report);
+      } else {
+        setReport(`Error: ${data.error}`);
+      }
+    } catch (error) {
+      setReport(`Request failed: ${error.message}`);
+    }
+  };
+  
+
+
+
+  // fin lo que meto
 
   return (
     <div className="App" style={{ textAlign: 'center', padding: '2rem' }}>
@@ -55,9 +86,38 @@ function App() {
 
       <div style={{ marginTop: '1rem' }}>
         <button style={buttonStyle}>Deobfuscate</button>
-        <button style={buttonStyle}>Create Obfuscation Report</button>
+        <button style={buttonStyle} onClick={handleGenerateReport}>Create Obfuscation Report</button>
+
         <button style={buttonStyle}>Deobfuscate using DeOtter AI</button>
       </div>
+
+      {report && (
+  <div
+    style={{
+      marginTop: '2rem',
+      maxWidth: '700px',
+      marginLeft: 'auto',
+      marginRight: 'auto',
+      textAlign: 'left',
+      backgroundColor: '#1e1e1e',
+      color: '#f8f8f2',
+      padding: '1rem',
+      borderRadius: '5px',
+      whiteSpace: 'pre-wrap',
+      fontFamily: '"Fira Code", monospace',
+      fontSize: '0.9rem',
+    }}
+  >
+    <strong>Obfuscation Report:</strong>
+    <br />
+    {report}
+  </div>
+)}
+
+
+
+
+      
     </div>
   );
 }

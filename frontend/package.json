@@ -15,11 +15,15 @@
     "web-vitals": "^2.1.4"
   },
   "scripts": {
-    "start": "react-scripts start",
-    "build": "react-scripts build",
-    "test": "react-scripts test",
-    "eject": "react-scripts eject"
-  },
+  "start": "concurrently \"npm run client\" \"npm run server\"",
+  "client": "cross-env BROWSER=none NODE_OPTIONS=--openssl-legacy-provider react-scripts start",
+  "server": "python3 backend/app.py",
+  "build": "cross-env NODE_OPTIONS=--openssl-legacy-provider react-scripts build",
+  "test": "react-scripts test",
+  "eject": "react-scripts eject"
+}
+
+,
   "eslintConfig": {
     "extends": [
       "react-app",
