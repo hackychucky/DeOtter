@@ -227,7 +227,7 @@ def find_dynamic_code_generation(content):
     }
 
 # FUNCTION THAT GENERATES REPORT
-def gen_report(filename):
+def generate_report(filename):
     try:
         with open(filename, 'r') as file:
             content = file.read()  # Reads the entire content of the specified file
@@ -350,7 +350,127 @@ def gen_report(filename):
     
 
 
+def gen_report_from_code(code_str):
+    try:
+    
+        content = code_str  # Reads the content from the string 
 
+        # Execute all detection functions
+        hex_data = find_hex_obfuscation(content)  # Finds hexadecimal obfuscation
+        base64_data = find_base64_obfuscation(content)  # Finds Base64 obfuscation
+        string_array_data = find_string_array_mapping(content)  # Detects string array mapping
+        dead_code_data = find_dead_code(content)  # Detects dead code
+        obfuscated_data = find_obfuscated_variables(content)  # Detects obfuscated variables
+        control_flow_data = find_control_flow_obfuscation(content)  # Detects control flow obfuscation
+        arithmetic_data = find_arithmetic_obfuscation(content)  # Detects arithmetic obfuscation
+        minification_data = find_minification(content) # Detects minification
+        dynamic_code_data = find_dynamic_code_generation(content) # Detects dynamic code generation
+
+
+
+
+        report = ""
+
+        # HEX analysis
+        if hex_data["matches"]:
+            report += f"· HEX encoding detected in the code:\n"
+            report += f" {hex_data['percentage']:.2f}% of the content is obfuscated using HEX encoding.\n"
+        else:
+            report += f"No HEX encoding detected in the code.\n"
+
+        # BASE64 analysis
+        if base64_data["matches"]:
+            report += f"\n· Base64 encoding detected in the code:\n"
+            report += f" {base64_data['percentage']:.2f}% of the content is obfuscated using Base64 encoding.\n"
+        else:
+            report += f"No Base64 encoding detected in the code.\n"
+
+        # String Array Mapping Analysis
+        if string_array_data["count"] > 0:
+            report += f"\n· String array mapping technique detected {string_array_data['count']} times:\n"
+            for mapping in string_array_data["matches"]:
+                var_name, var_value = mapping
+                report += f"  - {var_name} = {var_value};\n"
+        else:
+            report += "· No string array mapping technique detected.\n"
+
+        # Dead Code Detection Report
+        if dead_code_data["count"] > 0:
+            report += f"\n· Dead code detected:\n"
+            if dead_code_data["unused_vars"]:
+                report += f"  Unused variables: {', '.join(dead_code_data['unused_vars'])}\n"
+            if dead_code_data["unused_functions"]:
+                report += f"  Unused functions: {', '.join(dead_code_data['unused_functions'])}\n"
+            if dead_code_data["unreachable_code_blocks"]:
+                report += f"  Unreachable code blocks ({len(dead_code_data['unreachable_code_blocks'])}):\n"
+                for block in dead_code_data["unreachable_code_blocks"]:
+                    report += f"    {block}\n"
+        else:
+            report += f"No dead code detected in the code.\n"
+
+        # Obfuscated Variables Report
+        if obfuscated_data["count"] > 0:
+            report += f"\n· Obfuscated variable names detected {obfuscated_data['count']} times:\n"
+            for var_name in obfuscated_data["matches"]:
+                report += f"  - {var_name}: {obfuscated_data['values'].get(var_name, 'No value found')}\n"
+        else:
+            report += f"No obfuscated variable names detected.\n"
+        
+        
+        # Control Flow Obfuscation Report
+        if control_flow_data["count"] > 0:
+            report += f"· Control flow obfuscation detected {control_flow_data['count']} times:\n"
+            for line_number in control_flow_data["matches"]:
+                report += f"  - Line {line_number}\n"
+        else:
+            report += f"No control flow obfuscation detected.\n"
+
+
+            # Arithmetic Obfuscation Report
+        if arithmetic_data["count"] > 0:
+            report += f"· Arithmetic obfuscation detected {arithmetic_data['count']} times:\n"
+            for expression in arithmetic_data["matches"]:
+                report += f"  - {expression}\n"
+        else:
+            report += f"No arithmetic obfuscation detected.\n"
+        
+        # Minification Report
+        if minification_data["is_minified"]:
+            report += f"· Minification detected:\n"
+            report += f"  Original content length: {minification_data['original_length']} characters\n"
+            report += f"  Minified content length: {minification_data['cleaned_length']} characters\n"
+            report += f"  Whitespace reduction ratio: {minification_data['whitespace_ratio']:.2f}\n"
+        else:
+            report += f"No minification detected.\n"
+
+
+        # Dynamic Code Generation Report
+        if dynamic_code_data["dynamic_code_matches"]:
+            report += f"· Dynamic code generation detected:\n"
+            for code in dynamic_code_data["dynamic_code_matches"]:
+                report += f"  - {code}\n"
+        else:
+            report += f"No dynamic code generation detected.\n"
+
+        # Possible C&C Servers
+        if dynamic_code_data["possible_cc_servers"]:
+            report += f"· Possible C&C server addresses detected:\n"
+            for url in dynamic_code_data["possible_cc_servers"]:
+                report += f"  - {url}\n"
+        else:
+            report += f"No possible C&C server addresses detected.\n"
+
+
+
+        # Print report to stdout
+        print(report)  # Prints the report to standard output (console)
+        return report  # Returns the generated report
+    
+    except FileNotFoundError:
+        error_message = f"Error generating report:\n"
+        print(error_message)  # Prints error message if the file is not found
+        return error_message  # Returns error message
+        
 
 
 # FUNCTION THAT DEOBFUSCATES CODE (HEX, BASE64, String Array Mapping, Arithmetic)
@@ -468,7 +588,9 @@ def main():
     args = parser.parse_args()  # Parses commandline arguments
 
     if args.report:
-        report_content = gen_report(args.report) # Generates report if -r/--report argument is specified
+        report_content = generate_report(args.report) # Generates report if -r/--report argument is specified
+        # Print the output:
+        print(report_content)
         # Write report content to a file if output redirection is used
         if report_content and not sys.stdout.isatty():
             with open(sys.stdout.name, 'w') as output_file:
