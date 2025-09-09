@@ -17,7 +17,7 @@ function App() {
     return Prism.highlight(code, Prism.languages.javascript, 'javascript');
   };
 
-  // lo que meto
+  // Handler "Generate Report" button:
   const handleGenerateReport = async () => {
     try {
       const response = await fetch('http://127.0.0.1:5000/generate-report', {
@@ -40,7 +40,28 @@ function App() {
     }
   };
   
-
+  // Handler "Deobfuscate" button:
+  const handleDeobfuscate = async () => {
+    try {
+      const response = await fetch('http://127.0.0.1:5000/deobfuscate', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ code }),
+      });
+  
+      const data = await response.json();
+  
+      if (response.ok) {
+        setReport(data.deobfuscated); // reutilizamos el mismo div para mostrarlo
+      } else {
+        setReport(`Error: ${data.error}`);
+      }
+    } catch (error) {
+      setReport(`Request failed: ${error.message}`);
+    }
+  };
 
 
   // fin lo que meto
@@ -85,7 +106,7 @@ function App() {
       </div>
 
       <div style={{ marginTop: '1rem' }}>
-        <button style={buttonStyle}>Deobfuscate</button>
+        <button style={buttonStyle} onClick={handleDeobfuscate}>Deobfuscate</button>
         <button style={buttonStyle} onClick={handleGenerateReport}>Create Obfuscation Report</button>
 
         <button style={buttonStyle}>Deobfuscate using DeOtter AI</button>
