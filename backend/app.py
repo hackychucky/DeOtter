@@ -1,4 +1,6 @@
 from flask import Flask, request, jsonify
+from transformers import AutoTokenizer, AutoModel
+import torch
 from flask_cors import CORS
 from deotter import gen_report_from_code #We import the gem_report_from_code function
 import tempfile
@@ -9,7 +11,9 @@ app = Flask(__name__)
 CORS(app)  # Allows connections from React (localhost:3000)
 
 
-# Endpoint for "generate report" button
+# ------------------------------
+# GENERATE REPORT ENDPOINT
+# ------------------------------
 @app.route('/generate-report', methods=['POST'])
 def gen_report_endpoint():
     data = request.json
@@ -24,7 +28,9 @@ def gen_report_endpoint():
     return jsonify({'report': report})
 
 
-# Endpoint for "deobfuscate" button
+# ------------------------------
+# DEOBFUSCATE ENDPOINT
+# ------------------------------
 @app.route('/deobfuscate', methods=['POST'])
 def deobfuscate_code():
     data = request.get_json()
@@ -50,6 +56,69 @@ def deobfuscate_from_string(code_str):
     return result
 
 
+
+
+# ------------------------------
+# AI SECTION STARTS HERE
+# ------------------------------
+
+# Global VARS for the model
+MODEL = None
+TOKENIZER = None
+
+# ------------------------------
+# ENDPOINT FOR LOADING MODEL
+# ------------------------------
+@app.route("/load-model", methods=["POST"])
+def load_model():
+    global MODEL, TOKENIZER
+    data = request.get_json()
+    model_path = data.get("model_path", "")
+
+    if not os.path.exists(model_path):
+        return jsonify({"error": "Modelo no encontrado en la ruta especificada."}), 400
+
+    try:
+        TOKENIZER = AutoTokenizer.from_pretrained(model_path, local_files_only=True)
+        MODEL = AutoModel.from_pretrained(model_path, local_files_only=True)
+        return jsonify({"message": f"Modelo cargado correctamente desde {model_path}."})
+    except Exception as e:
+        return jsonify({"error": f"No se pudo cargar el modelo: {str(e)}"}), 500
+
+
+# ------------------------------
+# AENDPOINT FOR AI DEOBFUSCATE
+# ------------------------------
+
+
+@app.route("/ai-deobfuscate", methods=["POST"])
+def ai_deobfuscate():
+    # <-- START: INPUT
+    try:
+        data = request.get_json()
+        code = data.get("code", "")
+
+        if not code:
+            return jsonify({"error": "No code provided"}), 400
+
+        # Tokenizar el código
+        inputs = TOKENIZER(code, return_tensors="pt", truncation=True, max_length=512)
+
+        # Obtener embeddings
+        with torch.no_grad():
+            outputs = MODEL(**inputs)
+            # Tomamos el embedding del [CLS] token
+            embeddings = outputs.last_hidden_state[:,0,:].squeeze().tolist()
+
+    # <-- END: INPUT / PROCESSING
+
+    # <-- START: OUTPUT       
+
+        return jsonify({"embeddings": embeddings})
+    # <-- END: OUTPUT
+
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
 
 if __name__ == '__main__':
     # debug=True para reiniciar automáticamente con cambios y mostrar errores

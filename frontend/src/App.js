@@ -40,6 +40,36 @@ function App() {
     }
   };
   
+
+  // Handler "Load base model":
+  const handleLoadModel = async () => {
+    const modelPath = prompt("Introduce la ruta completa del modelo local:");
+  
+    if (!modelPath) return;
+  
+    try {
+      const response = await fetch("http://127.0.0.1:5000/load-model", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ model_path: modelPath }),
+      });
+  
+      const data = await response.json();
+  
+      if (response.ok) {
+        alert(data.message); // Puedes cambiar esto por un mensaje bonito en la UI
+      } else {
+        alert(`Error: ${data.error}`);
+      }
+    } catch (error) {
+      alert(`Request failed: ${error.message}`);
+    }
+  };
+  
+
+
   // Handler "Deobfuscate" button:
   const handleDeobfuscate = async () => {
     try {
@@ -64,7 +94,7 @@ function App() {
   };
 
 
-  // fin lo que meto
+  
 
   return (
     <div className="App" style={{ textAlign: 'center', padding: '2rem' }}>
@@ -108,8 +138,9 @@ function App() {
       <div style={{ marginTop: '1rem' }}>
         <button style={buttonStyle} onClick={handleDeobfuscate}>Deobfuscate</button>
         <button style={buttonStyle} onClick={handleGenerateReport}>Create Obfuscation Report</button>
-
+        <button style={buttonStyle} onClick={handleLoadModel}>Load Base Model</button>
         <button style={buttonStyle}>Deobfuscate using DeOtter AI</button>
+
       </div>
 
       {report && (
