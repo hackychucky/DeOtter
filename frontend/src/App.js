@@ -1,9 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import Editor from 'react-simple-code-editor';
 import Prism from 'prismjs';
-import 'prismjs/components/prism-javascript'; // para JS
-import 'prismjs/themes/prism-tomorrow.css'; // tema oscuro
-
+import 'prismjs/components/prism-javascript';
+import 'prismjs/themes/prism-tomorrow.css';
 import './App.css';
 
 function App() {
@@ -15,23 +14,20 @@ function App() {
   // función para aplicar resaltado con prism
   const highlight = (code) => Prism.highlight(code, Prism.languages.javascript, 'javascript');
 
-  // ------------------------------
-  // FETCH AVAILABLE MODELS (No carga automática)
-  // ------------------------------
+  // Fetch modelos disponibles al iniciar (no intenta cargar ninguno)
   useEffect(() => {
     const fetchModels = async () => {
       try {
         const res = await fetch("http://127.0.0.1:5000/available-models");
         const data = await res.json();
         if (res.ok) setAvailableModels(data.models);
-        else alert(`Error fetching models: ${data.error}`);
       } catch (err) {
-        alert(`Request failed: ${err.message}`);
+        console.warn("No se pudo cargar lista de modelos:", err.message);
       }
     };
     fetchModels();
   }, []);
-  
+
   // ------------------------------
   // HANDLERS
   // ------------------------------
@@ -81,15 +77,18 @@ function App() {
     }
   };
 
-  // Load model (solo cuando el usuario selecciona)
+  // Load selected model
   const handleLoadModel = async () => {
-    if (!selectedModel) return;
-  
+    if (!selectedModel) {
+      alert("Please select a model first!");
+      return;
+    }
+
     try {
       const response = await fetch("http://127.0.0.1:5000/load-model", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ model_path: selectedModel }),
+        body: JSON.stringify({ model_name: selectedModel }),
       });
       const data = await response.json();
       alert(response.ok ? data.message : `Error: ${data.error}`);
@@ -97,7 +96,7 @@ function App() {
       alert(`Request failed: ${error.message}`);
     }
   };
-  
+
   // ------------------------------
   // RENDER
   // ------------------------------
@@ -146,23 +145,23 @@ function App() {
         <button style={buttonStyle} onClick={handleDeobfuscate}>Deobfuscate</button>
         <button style={buttonStyle} onClick={handleGenerateReport}>Create Obfuscation Report</button>
         <button style={buttonStyle} onClick={handleAIDeobfuscate}>Deobfuscate using DeOtter AI</button>
-        </div>
 
-        <div style={{ marginTop: '1rem' }}>
-        {/* Selector de modelos */}
-        <select
-          value={selectedModel}
-          onChange={(e) => setSelectedModel(e.target.value)}
-          style={{ padding: '10px', fontSize: '1rem', marginLeft: '10px', marginRight: '10px' }}
-        >
-          <option value="">Select a model</option>
-          {availableModels.map((model) => (
-            <option key={model} value={model}>
-              {model}
-            </option>
-          ))}
-        </select>
-        <button style={buttonStyle} onClick={handleLoadModel}>Load Selected Model</button>
+        {/* Selector y botón de modelo en la misma línea */}
+        <div style={{ display: 'inline-flex', alignItems: 'center', marginLeft: '10px' }}>
+          <select
+            value={selectedModel}
+            onChange={(e) => setSelectedModel(e.target.value)}
+            style={{ padding: '10px', fontSize: '1rem', marginRight: '10px' }}
+          >
+            <option value="">Select a model</option>
+            {availableModels.map((model) => (
+              <option key={model} value={model}>
+                {model}
+              </option>
+            ))}
+          </select>
+          <button style={buttonStyle} onClick={handleLoadModel}>Load Selected Model</button>
+        </div>
       </div>
 
       {/* Reporte */}
