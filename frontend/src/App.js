@@ -1,101 +1,106 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import Editor from 'react-simple-code-editor';
 import Prism from 'prismjs';
 import 'prismjs/components/prism-javascript'; // para JS
-import 'prismjs/themes/prism-tomorrow.css'; // tema oscuro, puedes cambiarlo
+import 'prismjs/themes/prism-tomorrow.css'; // tema oscuro
 
 import './App.css';
 
 function App() {
   const [code, setCode] = useState('');
-  // State for report:
   const [report, setReport] = useState('');
-
+  const [availableModels, setAvailableModels] = useState([]);
+  const [selectedModel, setSelectedModel] = useState('');
 
   // función para aplicar resaltado con prism
-  const highlight = (code) => {
-    return Prism.highlight(code, Prism.languages.javascript, 'javascript');
-  };
+  const highlight = (code) => Prism.highlight(code, Prism.languages.javascript, 'javascript');
 
-  // Handler "Generate Report" button:
+  // ------------------------------
+  // FETCH AVAILABLE MODELS (No carga automática)
+  // ------------------------------
+  useEffect(() => {
+    const fetchModels = async () => {
+      try {
+        const res = await fetch("http://127.0.0.1:5000/available-models");
+        const data = await res.json();
+        if (res.ok) setAvailableModels(data.models);
+        else alert(`Error fetching models: ${data.error}`);
+      } catch (err) {
+        alert(`Request failed: ${err.message}`);
+      }
+    };
+    fetchModels();
+  }, []);
+  
+  // ------------------------------
+  // HANDLERS
+  // ------------------------------
+
+  // Generate report
   const handleGenerateReport = async () => {
     try {
       const response = await fetch('http://127.0.0.1:5000/generate-report', {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ code }),
       });
-  
       const data = await response.json();
-  
-      if (response.ok) {
-        setReport(data.report);
-      } else {
-        setReport(`Error: ${data.error}`);
-      }
+      setReport(response.ok ? data.report : `Error: ${data.error}`);
     } catch (error) {
       setReport(`Request failed: ${error.message}`);
     }
   };
-  
 
-  // Handler "Load base model":
+  // Deobfuscate
+  const handleDeobfuscate = async () => {
+    try {
+      const response = await fetch('http://127.0.0.1:5000/deobfuscate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ code }),
+      });
+      const data = await response.json();
+      setReport(response.ok ? data.deobfuscated : `Error: ${data.error}`);
+    } catch (error) {
+      setReport(`Request failed: ${error.message}`);
+    }
+  };
+
+  // AI Deobfuscate
+  const handleAIDeobfuscate = async () => {
+    try {
+      const response = await fetch('http://127.0.0.1:5000/ai-deobfuscate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ code }),
+      });
+      const data = await response.json();
+      setReport(response.ok ? `AI Embeddings generated! Vector size: ${data.embeddings.length}` : `Error: ${data.error}`);
+    } catch (error) {
+      setReport(`Request failed: ${error.message}`);
+    }
+  };
+
+  // Load model (solo cuando el usuario selecciona)
   const handleLoadModel = async () => {
-    const modelPath = prompt("Introduce la ruta completa del modelo local:");
-  
-    if (!modelPath) return;
+    if (!selectedModel) return;
   
     try {
       const response = await fetch("http://127.0.0.1:5000/load-model", {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({ model_path: modelPath }),
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ model_path: selectedModel }),
       });
-  
       const data = await response.json();
-  
-      if (response.ok) {
-        alert(data.message); // Puedes cambiar esto por un mensaje bonito en la UI
-      } else {
-        alert(`Error: ${data.error}`);
-      }
+      alert(response.ok ? data.message : `Error: ${data.error}`);
     } catch (error) {
       alert(`Request failed: ${error.message}`);
     }
   };
   
-
-
-  // Handler "Deobfuscate" button:
-  const handleDeobfuscate = async () => {
-    try {
-      const response = await fetch('http://127.0.0.1:5000/deobfuscate', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ code }),
-      });
-  
-      const data = await response.json();
-  
-      if (response.ok) {
-        setReport(data.deobfuscated); // reutilizamos el mismo div para mostrarlo
-      } else {
-        setReport(`Error: ${data.error}`);
-      }
-    } catch (error) {
-      setReport(`Request failed: ${error.message}`);
-    }
-  };
-
-
-  
-
+  // ------------------------------
+  // RENDER
+  // ------------------------------
   return (
     <div className="App" style={{ textAlign: 'center', padding: '2rem' }}>
       <img src="/deotterlogo1.png" alt="Logo" style={{ width: '600px', marginBottom: '2rem' }} />
@@ -104,6 +109,7 @@ function App() {
         Developed with ❤ from Spain by <strong>@HackyChucky</strong>
       </p>
 
+      {/* Editor */}
       <div
         style={{
           margin: '2rem auto',
@@ -114,7 +120,7 @@ function App() {
           fontSize: 16,
           borderRadius: 4,
           border: '1px solid #ccc',
-          backgroundColor: '#2d2d2d', // fondo oscuro para contraste
+          backgroundColor: '#2d2d2d',
           padding: '10px',
           minHeight: '200px',
         }}
@@ -128,48 +134,60 @@ function App() {
             outline: 0,
             whiteSpace: 'pre-wrap',
             overflowWrap: 'break-word',
-            color: '#f8f8f2', // texto claro para contraste
+            color: '#f8f8f2',
             minHeight: '180px',
           }}
           placeholder="Insert Javascript code to deobfuscate"
         />
       </div>
 
+      {/* Botones */}
       <div style={{ marginTop: '1rem' }}>
         <button style={buttonStyle} onClick={handleDeobfuscate}>Deobfuscate</button>
         <button style={buttonStyle} onClick={handleGenerateReport}>Create Obfuscation Report</button>
-        <button style={buttonStyle} onClick={handleLoadModel}>Load Base Model</button>
-        <button style={buttonStyle}>Deobfuscate using DeOtter AI</button>
+        <button style={buttonStyle} onClick={handleAIDeobfuscate}>Deobfuscate using DeOtter AI</button>
+        </div>
 
+        <div style={{ marginTop: '1rem' }}>
+        {/* Selector de modelos */}
+        <select
+          value={selectedModel}
+          onChange={(e) => setSelectedModel(e.target.value)}
+          style={{ padding: '10px', fontSize: '1rem', marginLeft: '10px', marginRight: '10px' }}
+        >
+          <option value="">Select a model</option>
+          {availableModels.map((model) => (
+            <option key={model} value={model}>
+              {model}
+            </option>
+          ))}
+        </select>
+        <button style={buttonStyle} onClick={handleLoadModel}>Load Selected Model</button>
       </div>
 
+      {/* Reporte */}
       {report && (
-  <div
-    style={{
-      marginTop: '2rem',
-      maxWidth: '700px',
-      marginLeft: 'auto',
-      marginRight: 'auto',
-      textAlign: 'left',
-      backgroundColor: '#1e1e1e',
-      color: '#f8f8f2',
-      padding: '1rem',
-      borderRadius: '5px',
-      whiteSpace: 'pre-wrap',
-      fontFamily: '"Fira Code", monospace',
-      fontSize: '0.9rem',
-    }}
-  >
-    <strong>Obfuscation Report:</strong>
-    <br />
-    {report}
-  </div>
-)}
-
-
-
-
-      
+        <div
+          style={{
+            marginTop: '2rem',
+            maxWidth: '700px',
+            marginLeft: 'auto',
+            marginRight: 'auto',
+            textAlign: 'left',
+            backgroundColor: '#1e1e1e',
+            color: '#f8f8f2',
+            padding: '1rem',
+            borderRadius: '5px',
+            whiteSpace: 'pre-wrap',
+            fontFamily: '"Fira Code", monospace',
+            fontSize: '0.9rem',
+          }}
+        >
+          <strong>Obfuscation Report:</strong>
+          <br />
+          {report}
+        </div>
+      )}
     </div>
   );
 }

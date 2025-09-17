@@ -6,6 +6,13 @@ from deotter import gen_report_from_code #We import the gem_report_from_code fun
 import tempfile
 import subprocess
 import os
+import json
+
+# Load preconfigured models
+CONFIG_PATH = os.path.join(os.path.dirname(__file__), "models_config.json")
+with open(CONFIG_PATH, "r") as f:
+    MODEL_PATHS = json.load(f)
+
 
 app = Flask(__name__)
 CORS(app)  # Allows connections from React (localhost:3000)
@@ -73,21 +80,24 @@ TOKENIZER = None
 def load_model():
     global MODEL, TOKENIZER
     data = request.get_json()
-    model_path = data.get("model_path", "")
+    model_name = data.get("model_name", "")
 
-    if not os.path.exists(model_path):
-        return jsonify({"error": "Modelo no encontrado en la ruta especificada."}), 400
+    if model_name not in MODEL_PATHS:
+        return jsonify({"error": f"Modelo '{model_name}' no encontrado en configuración."}), 400
+
+    model_path = MODEL_PATHS[model_name]
 
     try:
         TOKENIZER = AutoTokenizer.from_pretrained(model_path, local_files_only=True)
         MODEL = AutoModel.from_pretrained(model_path, local_files_only=True)
-        return jsonify({"message": f"Modelo cargado correctamente desde {model_path}."})
+        return jsonify({"message": f"Modelo '{model_name}' cargado correctamente."})
     except Exception as e:
         return jsonify({"error": f"No se pudo cargar el modelo: {str(e)}"}), 500
 
 
+
 # ------------------------------
-# AENDPOINT FOR AI DEOBFUSCATE
+# ENDPOINT FOR AI DEOBFUSCATE
 # ------------------------------
 
 
@@ -120,6 +130,33 @@ def ai_deobfuscate():
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
+
+@app.route("/available-models", methods=["GET"])
+def available_models():
+    try:
+        models = list(MODEL_PATHS.keys())
+        return jsonify({"models": models})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
 if __name__ == '__main__':
     # debug=True para reiniciar automáticamente con cambios y mostrar errores
     app.run(debug=True)
+
+
+# -------------------------------------
+# ENDPOINT FOR LISTING AVAILABLE MODELS
+# --------------------------------------
+# Ruta base donde guardas los modelos
+MODELS_DIR = "/Users/antonio/models"
+
+@app.route("/available-models", methods=["GET"])
+def available_models():
+    try:
+        models = [name for name in os.listdir(MODELS_DIR) 
+                  if os.path.isdir(os.path.join(MODELS_DIR, name))]
+        return jsonify({"models": models})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
