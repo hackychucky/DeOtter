@@ -6,6 +6,7 @@ import argparse # Library for interacting with arguments through commands
 import re       # Regular expressions library
 import sys      # To check if the stdoutput is being passed to the report file
 import base64   # To be able to work with b64 encoding/decoding
+import urllib.parse #To be able to parse urls
 
 
 # FUNCTION THAT SEARCHES FOR HEXADECIMAL CODE
@@ -195,6 +196,8 @@ def find_minification(content):
 
 # FUNCTION TO DETECT DYNAMIC CODE GENERATION
 
+
+    
 def find_dynamic_code_generation(content):
     """
     Detects dynamic code generation and potential C&C server addresses in the given content.
@@ -207,7 +210,7 @@ def find_dynamic_code_generation(content):
         r'setInterval\((.*?)\)',    # SetInterval
         r'XMLHttpRequest\(',        # XMLHttpRequest
         r'fetch\(',                 # Fetch
-        r'window\.open\((.*?)\)'   # Dynamic window opening
+        r'window\.open\((.*?)\)'    # Dynamic window opening
     ]
     
     # Collect matches
@@ -215,16 +218,42 @@ def find_dynamic_code_generation(content):
     for pattern in patterns:
         matches.extend(re.findall(pattern, content, re.DOTALL))
     
-    # Find potential C&C server addresses (e.g., URLs)
-    possible_cc_servers = re.findall(r'http[s]?://[^\s\'"<>]+', content, re.IGNORECASE)
+    # ---- Mejorada la parte de detección de URLs ----
     
-    # Filter potentially malicious URLs
-    malicious_urls = [url for url in possible_cc_servers if any(keyword in url for keyword in ['malicious', 'exploit', 'c2', 'attack', 'hacker', '.ru', '.xyz'])]
+    # Expresión regular flexible para detectar dominios/URLs
+    domain_pattern = re.compile(r'(?:[a-zA-Z0-9-]+\.)+[a-zA-Z]{2,}(?:/[^\s\'"<>]*)?')
 
+    # Posibles URLs extraídas
+    possible_cc_servers = re.findall(r'http[s]?://[^\s\'"<>]+', content, re.IGNORECASE)
+    possible_cc_servers += domain_pattern.findall(content)
+    
+    # Decodificación básica de palabras para URLs ofuscadas
+    for word in content.split():
+        # Base64
+        try:
+            decoded = base64.b64decode(word).decode(errors='ignore')
+            possible_cc_servers += domain_pattern.findall(decoded)
+        except Exception:
+            pass
+        # URL decode
+        decoded_url = urllib.parse.unquote(word)
+        possible_cc_servers += domain_pattern.findall(decoded_url)
+        # Reemplazo de "example[.]com"
+        possible_cc_servers += domain_pattern.findall(word.replace('[.]', '.'))
+
+    # Filtrado de URLs potencialmente maliciosas
+    keywords = [
+        'malicious', 'exploit', 'c2', 'attack', 'hacker', 'botnet', 'phish',
+        'spam', 'trojan', 'virus', 'payload', '.ru', '.xyz', '.top', '.tk', '.cn', '.info'
+    ]
+    
+    malicious_urls = [url for url in set(possible_cc_servers) if any(k in url.lower() for k in keywords)]
+    
     return {
         "dynamic_code_matches": matches,
         "possible_cc_servers": malicious_urls
     }
+
 
 # FUNCTION THAT GENERATES REPORT
 def generate_report(filename):
@@ -330,12 +359,22 @@ def generate_report(filename):
                 report += f"No dynamic code generation detected.\n"
 
             # Possible C&C Servers
-            if dynamic_code_data["possible_cc_servers"]:
-                report += f"· Possible C&C server addresses detected:\n"
-                for url in dynamic_code_data["possible_cc_servers"]:
+            # URLs detectadas
+            if dynamic_code_data["decoded_url"]:
+                report += "URLs detected:\n"
+                for url in dynamic_code_data["decoded_url"]:
                     report += f"  - {url}\n"
             else:
-                report += f"No possible C&C server addresses detected.\n"
+                report += "No URLs detected.\n"
+
+            # Possible C&C Servers (mismo bloque que antes)
+            if dynamic_code_data["possible_cc_servers"]:
+             report += "· Possible C&C server addresses detected:\n"
+             for url in dynamic_code_data["possible_cc_servers"]:
+                    report += f"  - {url}\n"
+            else:
+                report += "No possible C&C server addresses detected.\n"
+
 
 
 
