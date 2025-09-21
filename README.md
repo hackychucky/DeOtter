@@ -34,10 +34,10 @@ Developed with ❤️ by **@HackyChucky**.
 
 ### 1️⃣ Clone the Repository
 
-\`\`\`bash
-git clone https://github.com/yourusername/deotter.git
+```bash
+git clone https://github.com/hackychucky/deotter.git
 cd deotter
-\`\`\`
+```
 
 ---
 
@@ -47,7 +47,7 @@ Make sure you have **Python 3.9+** installed.
 
 #### Create Virtual Environment and Install Dependencies:
 
-\`\`\`bash
+```bash
 python -m venv venv
 # Activate the virtual environment
 source venv/bin/activate  # Linux / macOS
@@ -55,30 +55,30 @@ venv\\Scripts\\activate     # Windows
 
 # Install Python packages
 pip install flask flask-cors torch transformers
-\`\`\`
+```
 
 #### Optional Packages for AI:
 
-\`\`\`bash
+```bash
 pip install tokenizers
-\`\`\`
+```
 
 #### Configure Models Folder
 
-In \`app.py\` you will see a line like:
+In `app.py` you will see a line like:
 
-\`\`\`python
+```python
 MODELS_DIR = "/path/to/your/models"
-\`\`\`
+```
 
-- Replace \`/path/to/your/models\` with a folder on your machine.
+- Replace `/path/to/your/models` with a folder on your machine.
 - Each pretrained model should be in a **separate subdirectory** inside that folder.
 
 #### Run Flask Backend
 
-\`\`\`bash
+```bash
 python app.py
-\`\`\`
+```\`\`\````
 
 Backend will run at: `http://127.0.0.1:5000`
 
@@ -88,11 +88,11 @@ Backend will run at: `http://127.0.0.1:5000`
 
 Navigate to the frontend folder and install dependencies:
 
-\`\`\`bash
+```bash
 cd frontend
 npm install
 npm start
-\`\`\`
+```
 
 Frontend will run at: `http://localhost:3000`
 
@@ -133,7 +133,7 @@ Frontend will run at: `http://localhost:3000`
 
 ## 📂 Directory Structure
 
-\`\`\`text
+```text
 deotter/
 │
 ├─ app.py
@@ -145,7 +145,7 @@ deotter/
 │   │   └─ ...
 │   └─ package.json
 └─ README.md
-\`\`\`
+```
 
 ---
 
@@ -159,9 +159,9 @@ deotter/
 
 ## 🛠️ Optional: Install Pretrained Code Models (CodeBERT, etc.)
 
-\`\`\`bash
+```bash
 pip install transformers torch tokenizers
-\`\`\`
+∫```
 
 - Download your preferred pretrained models.
 - Place each model in a separate subfolder in your configured \`MODELS_DIR\`.
