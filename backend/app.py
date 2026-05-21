@@ -1,12 +1,18 @@
 from flask import Flask, request, jsonify
-from transformers import AutoTokenizer, AutoModel
-import torch
 from flask_cors import CORS
+
+try:
+    from transformers import AutoTokenizer, AutoModel
+    import torch
+    TRANSFORMERS_AVAILABLE = True
+except ImportError:
+    TRANSFORMERS_AVAILABLE = False
 from deotter import gen_report_from_code #We import the gem_report_from_code function
 import tempfile
 import subprocess
 import os
 import json
+import anthropic
 
 # Load preconfigured models
 CONFIG_PATH = os.path.join(os.path.dirname(__file__), "models_config.json")
@@ -79,6 +85,10 @@ TOKENIZER = None
 @app.route("/load-model", methods=["POST"])
 def load_model():
     global MODEL, TOKENIZER
+
+    if not TRANSFORMERS_AVAILABLE:
+        return jsonify({"error": "transformers/torch not installed. Local models unavailable."}), 500
+
     data = request.get_json()
     model_name = data.get("model_name", "")
 
@@ -97,13 +107,11 @@ def load_model():
 
 
 # ------------------------------
-# ENDPOINT FOR AI DEOBFUSCATE
+# ENDPOINT FOR AI DEOBFUSCATE (Claude / Anthropic API)
 # ------------------------------
-
 
 @app.route("/ai-deobfuscate", methods=["POST"])
 def ai_deobfuscate():
-    # <-- START: INPUT
     try:
         data = request.get_json()
         code = data.get("code", "")
@@ -111,21 +119,30 @@ def ai_deobfuscate():
         if not code:
             return jsonify({"error": "No code provided"}), 400
 
-        # Tokenizar el código
-        inputs = TOKENIZER(code, return_tensors="pt", truncation=True, max_length=512)
+        api_key = os.environ.get("ANTHROPIC_API_KEY")
+        if not api_key:
+            return jsonify({"error": "ANTHROPIC_API_KEY not set in environment"}), 500
 
-        # Obtener embeddings
-        with torch.no_grad():
-            outputs = MODEL(**inputs)
-            # Tomamos el embedding del [CLS] token
-            embeddings = outputs.last_hidden_state[:,0,:].squeeze().tolist()
+        client = anthropic.Anthropic(api_key=api_key)
 
-    # <-- END: INPUT / PROCESSING
+        message = client.messages.create(
+            model="claude-sonnet-4-6",
+            max_tokens=4096,
+            messages=[
+                {
+                    "role": "user",
+                    "content": (
+                        "You are a JavaScript deobfuscation expert. "
+                        "Deobfuscate the following JavaScript code. "
+                        "Return ONLY the clean, readable JavaScript code — no explanations, no markdown, no code fences.\n\n"
+                        f"{code}"
+                    ),
+                }
+            ],
+        )
 
-    # <-- START: OUTPUT       
-
-        return jsonify({"embeddings": embeddings})
-    # <-- END: OUTPUT
+        deobfuscated = message.content[0].text
+        return jsonify({"deobfuscated": deobfuscated})
 
     except Exception as e:
         return jsonify({"error": str(e)}), 500
@@ -141,22 +158,5 @@ def available_models():
 
 
 if __name__ == '__main__':
-    # debug=True para reiniciar automáticamente con cambios y mostrar errores
     app.run(debug=True)
-
-
-# -------------------------------------
-# ENDPOINT FOR LISTING AVAILABLE MODELS
-# --------------------------------------
-# Ruta base donde guardas los modelos
-MODELS_DIR = "/Users/antonio/models"
-
-@app.route("/available-models", methods=["GET"])
-def available_models():
-    try:
-        models = [name for name in os.listdir(MODELS_DIR) 
-                  if os.path.isdir(os.path.join(MODELS_DIR, name))]
-        return jsonify({"models": models})
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
 
