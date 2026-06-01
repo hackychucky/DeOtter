@@ -19,6 +19,28 @@ CONFIG_PATH = os.path.join(os.path.dirname(__file__), "models_config.json")
 with open(CONFIG_PATH, "r") as f:
     MODEL_PATHS = json.load(f)
 
+def build_prompt(code, pairs):
+    if not pairs:
+        return (
+            "You are a JavaScript deobfuscation expert. "
+            "Deobfuscate the following JavaScript code. "
+            "Return ONLY the clean, readable JavaScript code — no explanations, no markdown, no code fences.\n\n"
+            f"{code}"
+        )
+
+    examples = ""
+    for i, p in enumerate(pairs[-5:], 1):
+        examples += f"Example {i}:\nObfuscated:\n{p['obfuscated']}\nClean:\n{p['clean']}\n\n"
+
+    return (
+        "You are a JavaScript deobfuscation expert. "
+        "Use the following examples to understand the expected style and patterns, "
+        "then deobfuscate the code at the end. "
+        "Return ONLY the clean, readable JavaScript code — no explanations, no markdown, no code fences.\n\n"
+        f"{examples}"
+        f"Now deobfuscate this:\n{code}"
+    )
+
 
 app = Flask(__name__)
 CORS(app)  # Allows connections from React (localhost:3000)
@@ -107,6 +129,20 @@ def load_model():
 
 
 # ------------------------------
+# ENDPOINT FOR TRAINING PAIRS
+# ------------------------------
+
+@app.route("/train-model", methods=["POST"])
+def train_model():
+    try:
+        data = request.get_json()
+        new_pairs = data.get("pairs", [])
+        return jsonify({"message": f"{len(new_pairs)} pair(s) confirmed."})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+# ------------------------------
 # ENDPOINT FOR AI DEOBFUSCATE (Claude / Anthropic API)
 # ------------------------------
 
@@ -124,25 +160,17 @@ def ai_deobfuscate():
             return jsonify({"error": "ANTHROPIC_API_KEY not set in environment"}), 500
 
         client = anthropic.Anthropic(api_key=api_key)
+        pairs = data.get("pairs", [])
+        prompt = build_prompt(code, pairs)
 
         message = client.messages.create(
             model="claude-sonnet-4-6",
             max_tokens=4096,
-            messages=[
-                {
-                    "role": "user",
-                    "content": (
-                        "You are a JavaScript deobfuscation expert. "
-                        "Deobfuscate the following JavaScript code. "
-                        "Return ONLY the clean, readable JavaScript code — no explanations, no markdown, no code fences.\n\n"
-                        f"{code}"
-                    ),
-                }
-            ],
+            messages=[{"role": "user", "content": prompt}],
         )
 
         deobfuscated = message.content[0].text
-        return jsonify({"deobfuscated": deobfuscated})
+        return jsonify({"deobfuscated": deobfuscated, "examples_used": len(pairs[-5:])})
 
     except Exception as e:
         return jsonify({"error": str(e)}), 500
