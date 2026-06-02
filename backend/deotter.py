@@ -12,40 +12,52 @@ import urllib.parse #To be able to parse urls
 # FUNCTION THAT SEARCHES FOR HEXADECIMAL CODE
 
 def find_hex_obfuscation(content):
-    pattern = r'\\x[0-9a-fA-F]{2}'  # Pattern to find hexadecimal sequences like \x## (## are hexadecimal digits)
-    hex_matches = re.findall(pattern, content) # Finds all matches of the pattern in the content
-    hex_length = sum(len(match) for match in hex_matches) # Calculates the total length of the hexadecimal strings found
-    content_length = len(content) # Calculates the total lenght of the file content
-    hex_percentage = (hex_length / content_length) * 100 if content_length > 0 else 0 # Calculates the percentage
+    # \xNN byte escapes
+    hex_matches = re.findall(r'\\x[0-9a-fA-F]{2}', content)
+    # \uNNNN and \u{NNNNN} Unicode escapes
+    unicode_matches = re.findall(r'\\u(?:[0-9a-fA-F]{4}|\{[0-9a-fA-F]{1,6}\})', content)
+    all_matches = hex_matches + unicode_matches
 
-    # Returns the matches, the percentage, the total length and the lenght of the detected characters
+    match_length = sum(len(m) for m in all_matches)
+    content_length = len(content)
+    percentage = (match_length / content_length) * 100 if content_length > 0 else 0
+
     return {
-        "matches": hex_matches,
-        "percentage": hex_percentage,
+        "matches": all_matches,
+        "hex_matches": hex_matches,
+        "unicode_matches": unicode_matches,
+        "percentage": percentage,
         "total_length": content_length,
-        "hex_length": hex_length
+        "hex_length": match_length
     }
 
 # FUNCTION THAT SEARCHES FOR BASE64 CODE
 
 def find_base64_obfuscation(content):
-    # Pattern to find potential base64 sequences (strings of length divisible by 4, padded with '=')
-    # A general pattern that matches strings with a length multiple of 4, using common base64 characters
-    pattern = r'(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?'
-    base64_matches = re.findall(pattern, content)  # Finds all matches of the pattern in the content
+    # Match properly padded base64 strings of at least 16 chars (reduces noise)
+    candidates = re.findall(r'[A-Za-z0-9+/]{16,}={0,2}', content)
 
-    # Filter out non-base64 valid strings (since the regex might be too broad)
-    valid_base64_matches = [match for match in base64_matches if len(match) % 4 == 0]
-    valid_base64_matches = [match for match in valid_base64_matches if len(match) >= 8]  # Only consider matches of 8+ characters
+    valid = []
+    for candidate in candidates:
+        # Must be valid length
+        if len(candidate) % 4 not in (0, 2, 3):
+            continue
+        # Must actually decode to printable text (not random bytes)
+        try:
+            padded = candidate + '=' * (-len(candidate) % 4)
+            decoded = base64.b64decode(padded).decode('utf-8', errors='strict')
+            if all(32 <= ord(c) < 127 or c in '\n\r\t' for c in decoded):
+                valid.append(candidate)
+        except Exception:
+            continue
 
-    base64_length = sum(len(match) for match in valid_base64_matches)  # Calculates the total length of the base64 strings found
-    content_length = len(content)  # Calculates the total length of the file content
-    base64_percentage = (base64_length / content_length) * 100 if content_length > 0 else 0  # Calculates the percentage
+    base64_length = sum(len(m) for m in valid)
+    content_length = len(content)
+    percentage = (base64_length / content_length) * 100 if content_length > 0 else 0
 
-    # Returns the matches, the percentage, the total length, and the length of the detected characters
     return {
-        "matches": valid_base64_matches,
-        "percentage": base64_percentage,
+        "matches": valid,
+        "percentage": percentage,
         "total_length": content_length,
         "base64_length": base64_length
     }
@@ -53,115 +65,131 @@ def find_base64_obfuscation(content):
 
 # FUNCTION THAT SEARCHES FOR STRING ARRAY MAPPING
 def find_string_array_mapping(content):
-    pattern = r'var\s+([a-zA-Z_$][0-9a-zA-Z_$]*)\s*=\s*(\[.*?\]|\'.*?\'|\".*?\");'  # Pattern to detect "var [variableName] = [string/array]"
-    var_matches = re.findall(pattern, content)  # Finds all matches of the pattern in the content
+    # var/let/const declarations assigned to arrays or strings
+    decl_pattern = r'(?:var|let|const)\s+([a-zA-Z_$][0-9a-zA-Z_$]*)\s*=\s*(\[.*?\]|\'.*?\'|\".*?\");'
+    var_matches = re.findall(decl_pattern, content, re.DOTALL)
 
-    # Returns the matches and the count of string array mapping techniques detected
+    # _0x#### style array names (obfuscator.io signature)
+    hex_array_names = re.findall(r'\b(_0x[0-9a-fA-F]{3,6})\s*=\s*\[', content)
+
+    # Array lookup accesses like _arr[0], _arr[1]
+    array_accesses = re.findall(r'\b([a-zA-Z_$][0-9a-zA-Z_$]*)\s*\[\s*\d+\s*\]', content)
+    # Only count if the variable also appears as a declaration
+    declared = {m[0] for m in var_matches} | set(hex_array_names)
+    lookup_accesses = [a for a in array_accesses if a in declared]
+
+    total_count = len(var_matches) + len(hex_array_names)
+
     return {
         "matches": var_matches,
-        "count": len(var_matches)
+        "hex_array_names": list(set(hex_array_names)),
+        "lookup_accesses": list(set(lookup_accesses)),
+        "count": total_count
     }
 
 # FUNCTION THAT SEARCHES FOR DEAD CODE
 def find_dead_code(content):
-    # Detect unused variables
-    unused_vars = re.findall(r'var\s+([a-zA-Z_$][0-9a-zA-Z_$]*)\s*=', content)
-    used_vars = re.findall(r'\b([a-zA-Z_$][0-9a-zA-Z_$]*)\b', content)
-    unused_vars = [var for var in unused_vars if var not in used_vars]
+    # Unused variables: declared but appear only once (the declaration itself)
+    declared_vars = re.findall(r'(?:var|let|const)\s+([a-zA-Z_$][0-9a-zA-Z_$]*)\s*=', content)
+    unused_vars = [
+        v for v in declared_vars
+        if len(re.findall(rf'\b{re.escape(v)}\b', content)) <= 1
+    ]
 
-    # Detect unused functions
+    # Unused functions: defined but never called
     function_defs = re.findall(r'function\s+([a-zA-Z_$][0-9a-zA-Z_$]*)\s*\(', content)
-    function_calls = re.findall(r'\b([a-zA-Z_$][0-9a-zA-Z_$]*)\s*\(', content)
-    unused_functions = [func for func in function_defs if func not in function_calls]
+    called = set(re.findall(r'\b([a-zA-Z_$][0-9a-zA-Z_$]*)\s*\(', content))
+    unused_functions = [f for f in function_defs if f not in called]
 
-    # Detect unreachable code blocks (basic example, more complex analysis may be needed)
-    unreachable_code_blocks = re.findall(r'if\s*\(false\)\s*\{.*?\}', content, re.DOTALL)
+    # Unreachable code: if(false), if(0), while(false), code after return
+    unreachable_code_blocks = []
+    unreachable_code_blocks += re.findall(r'if\s*\(\s*(?:false|0)\s*\)\s*\{[^}]*\}', content, re.DOTALL)
+    unreachable_code_blocks += re.findall(r'while\s*\(\s*false\s*\)\s*\{[^}]*\}', content, re.DOTALL)
+    # Statements after a bare return; inside a block
+    unreachable_code_blocks += re.findall(r'return\s*;(?:\s*[^}\n][^\n]*\n)+', content)
 
     return {
-        "unused_vars": unused_vars,
-        "unused_functions": unused_functions,
+        "unused_vars": list(set(unused_vars)),
+        "unused_functions": list(set(unused_functions)),
         "unreachable_code_blocks": unreachable_code_blocks,
         "count": len(unused_vars) + len(unused_functions) + len(unreachable_code_blocks)
     }
 
 # FUNCTION THAT DETECTS OBFUSCATED VARIABLE NAMES
 def find_obfuscated_variables(content):
-    # Regular expression to match variable declarations
-    pattern = r'\bvar\s+([a-zA-Z_$][0-9a-zA-Z_$]*)\s*=\s*([^;]*)'
-    matches = re.findall(pattern, content)
-    
-    obfuscated_vars = []
-    var_values = {}
+    obfuscated = []
+    values = {}
 
-    for var_name, var_value in matches:
-        # Heuristic to detect obfuscated variables
-        # Variable name should be of significant length and appear non-descriptive
-        if (len(var_name) > 1 and  # Variable name should be longer than 1 character
-            not re.match(r'^[a-zA-Z_]\w*$', var_name) or  # Name should not be a common pattern
-            re.match(r'\d{1,2}', var_value) or  # Simple numeric values often not obfuscated
-            re.match(r'\[.*\]', var_value) or  # Arrays can be descriptive
-            re.match(r'"[^"]*"', var_value)):  # Strings can be descriptive
-            obfuscated_vars.append(var_name)
-            var_values[var_name] = var_value.strip().strip('";\'')
+    all_decls = re.findall(r'(?:var|let|const)\s+([a-zA-Z_$][0-9a-zA-Z_$]*)\s*=\s*([^;]{0,80})', content)
 
-    # Removing duplicates
-    obfuscated_vars = list(set(obfuscated_vars))
-    
+    vowels = set('aeiouAEIOU')
+    common_short = {'i', 'j', 'k', 'n', 'x', 'y', 'z', 'e', 'el', 'fn', 'cb', 'id', 'fs', 'db', 'vm', 'ok'}
+
+    for name, value in all_decls:
+        flagged = False
+
+        # _0x#### pattern — obfuscator.io and similar tools
+        if re.match(r'^_0x[0-9a-fA-F]+$', name):
+            flagged = True
+
+        # Single/double letter names (excluding common legitimate ones)
+        elif len(name) <= 2 and name not in common_short:
+            flagged = True
+
+        # Long names with no vowels — randomly generated identifiers
+        elif len(name) >= 5 and not any(c in vowels for c in name):
+            flagged = True
+
+        # Names that look like random letter sequences (high consonant density, 6+ chars)
+        elif len(name) >= 6:
+            vowel_count = sum(1 for c in name.lower() if c in vowels)
+            if vowel_count / len(name) < 0.1:
+                flagged = True
+
+        if flagged:
+            obfuscated.append(name)
+            values[name] = value.strip().strip('"\';')
+
+    obfuscated = list(set(obfuscated))
     return {
-        "matches": obfuscated_vars,
-        "values": var_values,
-        "count": len(obfuscated_vars)
+        "matches": obfuscated,
+        "values": values,
+        "count": len(obfuscated)
     }
 
 
 # Function to detect Control Flow Obfuscation (Spaghetti Code)
 def find_control_flow_obfuscation(content):
-    """
-    Detects control flow obfuscation (spaghetti code) by looking for complex nested structures and unusual control flow patterns.
-    """
-    # Patterns to detect nested loops, unusual break/continue usage, etc.
     patterns = [
-        r'if\s*\(.*\)\s*{[^}]*if\s*\(.*\)\s*{[^}]*}',  # Nested if statements
-        r'for\s*\(.*\)\s*{[^}]*while\s*\(.*\)\s*{[^}]*}',  # For and while loops nested
-        r'function\s+.*\(\)\s*{[^}]*function\s+.*\(\)\s*{[^}]*}',  # Nested functions
-        r'\bcontinue\b[^;]*;[^}]*\bbreak\b[^;]*;'  # Unusual break/continue usage
+        r'if\s*\(.*\)\s*{[^}]*if\s*\(.*\)\s*{[^}]*}',           # Nested if statements
+        r'for\s*\(.*\)\s*{[^}]*while\s*\(.*\)\s*{[^}]*}',        # Nested for+while
+        r'function\s+.*\(\)\s*{[^}]*function\s+.*\(\)\s*{[^}]*}', # Nested functions
+        r'\bcontinue\b[^;]*;[^}]*\bbreak\b[^;]*;',               # Unusual break/continue
+        # Switch-based dispatcher: switch on array/variable with 4+ numeric cases
+        r'switch\s*\([^)]+\)\s*\{(?:\s*case\s+\d+\s*:.*?){4,}',
+        # Comma operator chains used to obscure sequential execution
+        r'(?:[a-zA-Z_$][\w$]*\s*=\s*[^,;]+,\s*){3,}',
     ]
-    
+
     matches = []
     line_numbers = set()
-    
-    # Split content into lines for line number tracking
-    lines = content.splitlines()
-    
+
     for pattern in patterns:
         for match in re.finditer(pattern, content, re.DOTALL):
-            # Find the line number where the match starts
-            match_start = match.start()
-            line_number = content.count('\n', 0, match_start) + 1
+            line_number = content.count('\n', 0, match.start()) + 1
             line_numbers.add(line_number)
             matches.append(match.group())
-    
+
     return {"count": len(matches), "matches": list(line_numbers)}
 
-# FUNCTION TO DETECT ARITHMETIC OBFUSCATION
+# FUNCTION TO DETECT STRING CONCATENATION OBFUSCATION
 
-def find_arithmetic_obfuscation(content):
-    """
-    Detect arithmetic obfuscation in the given content by identifying
-    common patterns of obfuscated arithmetic expressions.
-    """
-    arithmetic_patterns = [
-        r'\b(?:\d+ \+ \d+| \d+ \* \d+| \d+ - \d+| \d+ / \d+)\b',
-        r'\b(?:\d+ \+ \d+ \* \d+| \d+ \* \d+ - \d+| \d+ / \d+ + \d+)\b'
-    ]
-    
-    matches = []
-    for pattern in arithmetic_patterns:
-        matches.extend(re.findall(pattern, content))
-    
-    count = len(matches)
+def find_string_concatenation(content):
+    # Chains of 3 or more string literals joined by +
+    pattern = r'(?:(?:"[^"]*"|\'[^\']*\')\s*\+\s*){2,}(?:"[^"]*"|\'[^\']*\')'
+    matches = re.findall(pattern, content)
     return {
-        "count": count,
+        "count": len(matches),
         "matches": matches
     }
 
@@ -169,28 +197,23 @@ def find_arithmetic_obfuscation(content):
 # FUNCTION TO DETECT MINIFICATION OBFUSCATION
 
 def find_minification(content):
-    """
-    Detects minification in the given content by checking for typical patterns of minified code.
-    """
-    # Count the number of spaces and new lines in the original content
-    original_whitespace = len(re.findall(r'\s+', content))
-    
-    # Remove all whitespace characters from the content
-    minified_content = re.sub(r'\s+', '', content)
-    
-    # Count the number of whitespace characters in the minified content
-    minified_whitespace = len(re.findall(r'\s+', minified_content))
-    
-    # If there are fewer whitespace characters, it could be minified
-    minification_ratio = (original_whitespace - minified_whitespace) / original_whitespace
+    if not content.strip():
+        return {"is_minified": False, "original_length": 0, "avg_line_length": 0, "whitespace_ratio": 0}
 
-    is_minified = minification_ratio > 0.5  # Threshold of 50% reduction in whitespace to consider as minified
+    lines = [l for l in content.splitlines() if l.strip()]
+    avg_line_length = sum(len(l) for l in lines) / len(lines) if lines else 0
+
+    non_whitespace = len(re.sub(r'\s', '', content))
+    whitespace_ratio = 1 - (non_whitespace / len(content))
+
+    # Minified: very long average lines AND very little whitespace relative to code
+    is_minified = avg_line_length > 200 or (whitespace_ratio < 0.1 and len(content) > 200)
 
     return {
         "is_minified": is_minified,
         "original_length": len(content),
-        "cleaned_length": len(minified_content),
-        "whitespace_ratio": minification_ratio
+        "avg_line_length": round(avg_line_length, 1),
+        "whitespace_ratio": round(whitespace_ratio, 3)
     }
 
 
@@ -261,46 +284,48 @@ def generate_report(filename):
         with open(filename, 'r') as file:
             content = file.read()  # Reads the entire content of the specified file
 
-            # Execute all detection functions
-            hex_data = find_hex_obfuscation(content)  # Finds hexadecimal obfuscation
-            base64_data = find_base64_obfuscation(content)  # Finds Base64 obfuscation
-            string_array_data = find_string_array_mapping(content)  # Detects string array mapping
-            dead_code_data = find_dead_code(content)  # Detects dead code
-            obfuscated_data = find_obfuscated_variables(content)  # Detects obfuscated variables
-            control_flow_data = find_control_flow_obfuscation(content)  # Detects control flow obfuscation
-            arithmetic_data = find_arithmetic_obfuscation(content)  # Detects arithmetic obfuscation
-            minification_data = find_minification(content) # Detects minification
-            dynamic_code_data = find_dynamic_code_generation(content) # Detects dynamic code generation
-
-
-
+            hex_data = find_hex_obfuscation(content)
+            base64_data = find_base64_obfuscation(content)
+            string_array_data = find_string_array_mapping(content)
+            dead_code_data = find_dead_code(content)
+            obfuscated_data = find_obfuscated_variables(content)
+            control_flow_data = find_control_flow_obfuscation(content)
+            arithmetic_data = find_arithmetic_obfuscation(content)
+            concat_data = find_string_concatenation(content)
+            minification_data = find_minification(content)
+            dynamic_code_data = find_dynamic_code_generation(content)
 
             report = ""
 
-            # HEX analysis
             if hex_data["matches"]:
-                report += f"· HEX encoding detected in file {filename}:\n"
-                report += f" {hex_data['percentage']:.2f}% of the content is obfuscated using HEX encoding.\n"
+                report += f"· HEX/Unicode encoding detected in file {filename}:\n"
+                report += f"  {hex_data['percentage']:.2f}% of content uses \\x or \\u escapes"
+                if hex_data["unicode_matches"]:
+                    report += f" ({len(hex_data['unicode_matches'])} Unicode escape(s))"
+                report += "\n"
             else:
-                report += f"No HEX encoding detected in file {filename}.\n"
+                report += f"No HEX/Unicode encoding detected.\n"
 
-            # BASE64 analysis
             if base64_data["matches"]:
-                report += f"\n· Base64 encoding detected in file {filename}:\n"
-                report += f" {base64_data['percentage']:.2f}% of the content is obfuscated using Base64 encoding.\n"
+                report += f"\n· Base64 encoding detected ({len(base64_data['matches'])} string(s)):\n"
+                report += f"  {base64_data['percentage']:.2f}% of content is Base64.\n"
             else:
-                report += f"No Base64 encoding detected in file {filename}.\n"
+                report += "No Base64 encoding detected.\n"
 
-            # String Array Mapping Analysis
             if string_array_data["count"] > 0:
-                report += f"\n· String array mapping technique detected {string_array_data['count']} times:\n"
-                for mapping in string_array_data["matches"]:
-                    var_name, var_value = mapping
-                    report += f"  - {var_name} = {var_value};\n"
+                report += f"\n· String array mapping detected {string_array_data['count']} time(s):\n"
+                for name, value in string_array_data["matches"]:
+                    report += f"  - {name} = {value[:60]};\n"
+                if string_array_data["hex_array_names"]:
+                    report += f"  Obfuscator-style arrays: {', '.join(string_array_data['hex_array_names'])}\n"
             else:
-                report += "· No string array mapping technique detected.\n"
+                report += "No string array mapping detected.\n"
 
-            # Dead Code Detection Report
+            if concat_data["count"] > 0:
+                report += f"\n· String concatenation obfuscation detected {concat_data['count']} chain(s).\n"
+            else:
+                report += "No string concatenation obfuscation detected.\n"
+
             if dead_code_data["count"] > 0:
                 report += f"\n· Dead code detected:\n"
                 if dead_code_data["unused_vars"]:
@@ -308,69 +333,42 @@ def generate_report(filename):
                 if dead_code_data["unused_functions"]:
                     report += f"  Unused functions: {', '.join(dead_code_data['unused_functions'])}\n"
                 if dead_code_data["unreachable_code_blocks"]:
-                    report += f"  Unreachable code blocks ({len(dead_code_data['unreachable_code_blocks'])}):\n"
-                    for block in dead_code_data["unreachable_code_blocks"]:
-                        report += f"    {block}\n"
+                    report += f"  Unreachable code blocks: {len(dead_code_data['unreachable_code_blocks'])}\n"
             else:
-                report += f"No dead code detected in file {filename}.\n"
+                report += "No dead code detected.\n"
 
-            # Obfuscated Variables Report
             if obfuscated_data["count"] > 0:
-                report += f"\n· Obfuscated variable names detected {obfuscated_data['count']} times:\n"
-                for var_name in obfuscated_data["matches"]:
-                    report += f"  - {var_name}: {obfuscated_data['values'].get(var_name, 'No value found')}\n"
+                report += f"\n· Obfuscated variable names detected ({obfuscated_data['count']}):\n"
+                for name in obfuscated_data["matches"]:
+                    report += f"  - {name}: {obfuscated_data['values'].get(name, '')[:60]}\n"
             else:
-                report += f"No obfuscated variable names detected.\n"
-            
-            
-            # Control Flow Obfuscation Report
+                report += "No obfuscated variable names detected.\n"
+
             if control_flow_data["count"] > 0:
-                report += f"· Control flow obfuscation detected {control_flow_data['count']} times:\n"
-                for line_number in control_flow_data["matches"]:
-                    report += f"  - Line {line_number}\n"
+                report += f"\n· Control flow obfuscation detected {control_flow_data['count']} time(s) at lines: {control_flow_data['matches']}\n"
             else:
-                report += f"No control flow obfuscation detected.\n"
+                report += "No control flow obfuscation detected.\n"
 
-
-             # Arithmetic Obfuscation Report
             if arithmetic_data["count"] > 0:
-                report += f"· Arithmetic obfuscation detected {arithmetic_data['count']} times:\n"
-                for expression in arithmetic_data["matches"]:
-                    report += f"  - {expression}\n"
+                report += f"\n· Arithmetic obfuscation detected {arithmetic_data['count']} expression(s).\n"
             else:
-                report += f"No arithmetic obfuscation detected.\n"
-            
-            # Minification Report
+                report += "No arithmetic obfuscation detected.\n"
+
             if minification_data["is_minified"]:
-                report += f"· Minification detected:\n"
-                report += f"  Original content length: {minification_data['original_length']} characters\n"
-                report += f"  Minified content length: {minification_data['cleaned_length']} characters\n"
-                report += f"  Whitespace reduction ratio: {minification_data['whitespace_ratio']:.2f}\n"
+                report += f"\n· Minification detected:\n"
+                report += f"  Avg line length: {minification_data['avg_line_length']} chars\n"
+                report += f"  Whitespace ratio: {minification_data['whitespace_ratio']:.1%}\n"
             else:
-                report += f"No minification detected.\n"
+                report += "No minification detected.\n"
 
-
-            # Dynamic Code Generation Report
             if dynamic_code_data["dynamic_code_matches"]:
-                report += f"· Dynamic code generation detected:\n"
-                for code in dynamic_code_data["dynamic_code_matches"]:
-                    report += f"  - {code}\n"
+                report += f"\n· Dynamic code generation detected ({len(dynamic_code_data['dynamic_code_matches'])} instance(s)).\n"
             else:
-                report += f"No dynamic code generation detected.\n"
+                report += "No dynamic code generation detected.\n"
 
-            # Possible C&C Servers
-            # URLs detectadas
-            if dynamic_code_data["decoded_url"]:
-                report += "URLs detected:\n"
-                for url in dynamic_code_data["decoded_url"]:
-                    report += f"  - {url}\n"
-            else:
-                report += "No URLs detected.\n"
-
-            # Possible C&C Servers (mismo bloque que antes)
             if dynamic_code_data["possible_cc_servers"]:
-             report += "· Possible C&C server addresses detected:\n"
-             for url in dynamic_code_data["possible_cc_servers"]:
+                report += f"\n· Possible C&C server addresses detected:\n"
+                for url in dynamic_code_data["possible_cc_servers"]:
                     report += f"  - {url}\n"
             else:
                 report += "No possible C&C server addresses detected.\n"
@@ -394,46 +392,48 @@ def gen_report_from_code(code_str):
     
         content = code_str  # Reads the content from the string 
 
-        # Execute all detection functions
-        hex_data = find_hex_obfuscation(content)  # Finds hexadecimal obfuscation
-        base64_data = find_base64_obfuscation(content)  # Finds Base64 obfuscation
-        string_array_data = find_string_array_mapping(content)  # Detects string array mapping
-        dead_code_data = find_dead_code(content)  # Detects dead code
-        obfuscated_data = find_obfuscated_variables(content)  # Detects obfuscated variables
-        control_flow_data = find_control_flow_obfuscation(content)  # Detects control flow obfuscation
-        arithmetic_data = find_arithmetic_obfuscation(content)  # Detects arithmetic obfuscation
-        minification_data = find_minification(content) # Detects minification
-        dynamic_code_data = find_dynamic_code_generation(content) # Detects dynamic code generation
-
-
-
+        hex_data = find_hex_obfuscation(content)
+        base64_data = find_base64_obfuscation(content)
+        string_array_data = find_string_array_mapping(content)
+        dead_code_data = find_dead_code(content)
+        obfuscated_data = find_obfuscated_variables(content)
+        control_flow_data = find_control_flow_obfuscation(content)
+        arithmetic_data = find_arithmetic_obfuscation(content)
+        concat_data = find_string_concatenation(content)
+        minification_data = find_minification(content)
+        dynamic_code_data = find_dynamic_code_generation(content)
 
         report = ""
 
-        # HEX analysis
         if hex_data["matches"]:
-            report += f"· HEX encoding detected in the code:\n"
-            report += f" {hex_data['percentage']:.2f}% of the content is obfuscated using HEX encoding.\n"
+            report += f"· HEX/Unicode encoding detected:\n"
+            report += f"  {hex_data['percentage']:.2f}% of content uses \\x or \\u escapes"
+            if hex_data["unicode_matches"]:
+                report += f" ({len(hex_data['unicode_matches'])} Unicode escape(s))"
+            report += "\n"
         else:
-            report += f"No HEX encoding detected in the code.\n"
+            report += "No HEX/Unicode encoding detected.\n"
 
-        # BASE64 analysis
         if base64_data["matches"]:
-            report += f"\n· Base64 encoding detected in the code:\n"
-            report += f" {base64_data['percentage']:.2f}% of the content is obfuscated using Base64 encoding.\n"
+            report += f"\n· Base64 encoding detected ({len(base64_data['matches'])} string(s)):\n"
+            report += f"  {base64_data['percentage']:.2f}% of content is Base64.\n"
         else:
-            report += f"No Base64 encoding detected in the code.\n"
+            report += "No Base64 encoding detected.\n"
 
-        # String Array Mapping Analysis
         if string_array_data["count"] > 0:
-            report += f"\n· String array mapping technique detected {string_array_data['count']} times:\n"
-            for mapping in string_array_data["matches"]:
-                var_name, var_value = mapping
-                report += f"  - {var_name} = {var_value};\n"
+            report += f"\n· String array mapping detected {string_array_data['count']} time(s):\n"
+            for name, value in string_array_data["matches"]:
+                report += f"  - {name} = {value[:60]};\n"
+            if string_array_data["hex_array_names"]:
+                report += f"  Obfuscator-style arrays: {', '.join(string_array_data['hex_array_names'])}\n"
         else:
-            report += "· No string array mapping technique detected.\n"
+            report += "No string array mapping detected.\n"
 
-        # Dead Code Detection Report
+        if concat_data["count"] > 0:
+            report += f"\n· String concatenation obfuscation detected {concat_data['count']} chain(s).\n"
+        else:
+            report += "No string concatenation obfuscation detected.\n"
+
         if dead_code_data["count"] > 0:
             report += f"\n· Dead code detected:\n"
             if dead_code_data["unused_vars"]:
@@ -441,63 +441,45 @@ def gen_report_from_code(code_str):
             if dead_code_data["unused_functions"]:
                 report += f"  Unused functions: {', '.join(dead_code_data['unused_functions'])}\n"
             if dead_code_data["unreachable_code_blocks"]:
-                report += f"  Unreachable code blocks ({len(dead_code_data['unreachable_code_blocks'])}):\n"
-                for block in dead_code_data["unreachable_code_blocks"]:
-                    report += f"    {block}\n"
+                report += f"  Unreachable code blocks: {len(dead_code_data['unreachable_code_blocks'])}\n"
         else:
-            report += f"No dead code detected in the code.\n"
+            report += "No dead code detected.\n"
 
-        # Obfuscated Variables Report
         if obfuscated_data["count"] > 0:
-            report += f"\n· Obfuscated variable names detected {obfuscated_data['count']} times:\n"
-            for var_name in obfuscated_data["matches"]:
-                report += f"  - {var_name}: {obfuscated_data['values'].get(var_name, 'No value found')}\n"
+            report += f"\n· Obfuscated variable names detected ({obfuscated_data['count']}):\n"
+            for name in obfuscated_data["matches"]:
+                report += f"  - {name}: {obfuscated_data['values'].get(name, '')[:60]}\n"
         else:
-            report += f"No obfuscated variable names detected.\n"
-        
-        
-        # Control Flow Obfuscation Report
+            report += "No obfuscated variable names detected.\n"
+
         if control_flow_data["count"] > 0:
-            report += f"· Control flow obfuscation detected {control_flow_data['count']} times:\n"
-            for line_number in control_flow_data["matches"]:
-                report += f"  - Line {line_number}\n"
+            report += f"\n· Control flow obfuscation detected {control_flow_data['count']} time(s) at lines: {control_flow_data['matches']}\n"
         else:
-            report += f"No control flow obfuscation detected.\n"
+            report += "No control flow obfuscation detected.\n"
 
-
-            # Arithmetic Obfuscation Report
         if arithmetic_data["count"] > 0:
-            report += f"· Arithmetic obfuscation detected {arithmetic_data['count']} times:\n"
-            for expression in arithmetic_data["matches"]:
-                report += f"  - {expression}\n"
+            report += f"\n· Arithmetic obfuscation detected {arithmetic_data['count']} expression(s).\n"
         else:
-            report += f"No arithmetic obfuscation detected.\n"
-        
-        # Minification Report
+            report += "No arithmetic obfuscation detected.\n"
+
         if minification_data["is_minified"]:
-            report += f"· Minification detected:\n"
-            report += f"  Original content length: {minification_data['original_length']} characters\n"
-            report += f"  Minified content length: {minification_data['cleaned_length']} characters\n"
-            report += f"  Whitespace reduction ratio: {minification_data['whitespace_ratio']:.2f}\n"
+            report += f"\n· Minification detected:\n"
+            report += f"  Avg line length: {minification_data['avg_line_length']} chars\n"
+            report += f"  Whitespace ratio: {minification_data['whitespace_ratio']:.1%}\n"
         else:
-            report += f"No minification detected.\n"
+            report += "No minification detected.\n"
 
-
-        # Dynamic Code Generation Report
         if dynamic_code_data["dynamic_code_matches"]:
-            report += f"· Dynamic code generation detected:\n"
-            for code in dynamic_code_data["dynamic_code_matches"]:
-                report += f"  - {code}\n"
+            report += f"\n· Dynamic code generation detected ({len(dynamic_code_data['dynamic_code_matches'])} instance(s)).\n"
         else:
-            report += f"No dynamic code generation detected.\n"
+            report += "No dynamic code generation detected.\n"
 
-        # Possible C&C Servers
         if dynamic_code_data["possible_cc_servers"]:
-            report += f"· Possible C&C server addresses detected:\n"
+            report += f"\n· Possible C&C server addresses detected:\n"
             for url in dynamic_code_data["possible_cc_servers"]:
                 report += f"  - {url}\n"
         else:
-            report += f"No possible C&C server addresses detected.\n"
+            report += "No possible C&C server addresses detected.\n"
 
 
 

@@ -7,7 +7,7 @@ try:
     TRANSFORMERS_AVAILABLE = True
 except ImportError:
     TRANSFORMERS_AVAILABLE = False
-from deotter import gen_report_from_code #We import the gem_report_from_code function
+from deotter import gen_report_from_code, find_string_concatenation
 import tempfile
 import subprocess
 import os
@@ -19,23 +19,72 @@ CONFIG_PATH = os.path.join(os.path.dirname(__file__), "models_config.json")
 with open(CONFIG_PATH, "r") as f:
     MODEL_PATHS = json.load(f)
 
-def build_prompt(code, pairs):
+def detect_patterns(code):
+    techniques = []
+    if find_hex_obfuscation(code)["matches"]:
+        techniques.append("hex encoding")
+    if find_base64_obfuscation(code)["matches"]:
+        techniques.append("base64 encoding")
+    if find_string_array_mapping(code)["count"] > 0:
+        techniques.append("string array mapping")
+    if find_dead_code(code)["count"] > 0:
+        techniques.append("dead code")
+    if find_obfuscated_variables(code)["count"] > 0:
+        techniques.append("obfuscated variable names")
+    if find_control_flow_obfuscation(code)["count"] > 0:
+        techniques.append("control flow obfuscation")
+    if find_arithmetic_obfuscation(code)["count"] > 0:
+        techniques.append("arithmetic obfuscation")
+    if find_minification(code)["is_minified"]:
+        techniques.append("minification")
+    if find_dynamic_code_generation(code)["dynamic_code_matches"]:
+        techniques.append("dynamic code generation")
+    if find_string_concatenation(code)["count"] > 0:
+        techniques.append("string concatenation")
+    return techniques
+
+
+def select_pairs(pairs, detected_patterns, max_pairs=5):
     if not pairs:
+        return []
+    if detected_patterns:
+        matching = [
+            p for p in pairs
+            if any(pat in p.get("patterns", []) for pat in detected_patterns)
+        ]
+        if matching:
+            return matching[-max_pairs:]
+    return pairs[-max_pairs:]
+
+
+def build_prompt(code, selected_pairs, detected_patterns):
+    pattern_line = (
+        f"This code uses the following obfuscation techniques: {', '.join(detected_patterns)}. "
+        if detected_patterns else ""
+    )
+
+    if not selected_pairs:
         return (
             "You are a JavaScript deobfuscation expert. "
+            f"{pattern_line}"
             "Deobfuscate the following JavaScript code. "
             "Return ONLY the clean, readable JavaScript code — no explanations, no markdown, no code fences.\n\n"
             f"{code}"
         )
 
     examples = ""
-    for i, p in enumerate(pairs[-5:], 1):
-        examples += f"Example {i}:\nObfuscated:\n{p['obfuscated']}\nClean:\n{p['clean']}\n\n"
+    for i, p in enumerate(selected_pairs, 1):
+        pair_patterns = ", ".join(p.get("patterns", [])) or "unknown"
+        examples += (
+            f"Example {i} (techniques: {pair_patterns}):\n"
+            f"Obfuscated:\n{p['obfuscated']}\n"
+            f"Clean:\n{p['clean']}\n\n"
+        )
 
     return (
         "You are a JavaScript deobfuscation expert. "
-        "Use the following examples to understand the expected style and patterns, "
-        "then deobfuscate the code at the end. "
+        f"{pattern_line}"
+        "Use the following examples with similar obfuscation patterns as reference. "
         "Return ONLY the clean, readable JavaScript code — no explanations, no markdown, no code fences.\n\n"
         f"{examples}"
         f"Now deobfuscate this:\n{code}"
@@ -70,8 +119,9 @@ def gen_report_endpoint():
 def deobfuscate_code():
     data = request.get_json()
     code = data.get('code', '')
+    detected_patterns = detect_patterns(code)
     deobfuscated_code = deobfuscate_from_string(code)
-    return jsonify({"deobfuscated": deobfuscated_code})
+    return jsonify({"deobfuscated": deobfuscated_code, "patterns": detected_patterns})
 
 
 # Función auxiliar para usar deobfuscate directamente sobre strings
@@ -161,7 +211,9 @@ def ai_deobfuscate():
 
         client = anthropic.Anthropic(api_key=api_key)
         pairs = data.get("pairs", [])
-        prompt = build_prompt(code, pairs)
+        detected_patterns = detect_patterns(code)
+        selected = select_pairs(pairs, detected_patterns)
+        prompt = build_prompt(code, selected, detected_patterns)
 
         message = client.messages.create(
             model="claude-sonnet-4-6",
@@ -170,7 +222,11 @@ def ai_deobfuscate():
         )
 
         deobfuscated = message.content[0].text
-        return jsonify({"deobfuscated": deobfuscated, "examples_used": len(pairs[-5:])})
+        return jsonify({
+            "deobfuscated": deobfuscated,
+            "patterns": detected_patterns,
+            "examples_used": len(selected),
+        })
 
     except Exception as e:
         return jsonify({"error": str(e)}), 500
