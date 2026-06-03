@@ -7,7 +7,19 @@ try:
     TRANSFORMERS_AVAILABLE = True
 except ImportError:
     TRANSFORMERS_AVAILABLE = False
-from deotter import gen_report_from_code, find_string_concatenation
+from deotter import (
+    gen_report_from_code,
+    find_hex_obfuscation,
+    find_base64_obfuscation,
+    find_string_array_mapping,
+    find_dead_code,
+    find_obfuscated_variables,
+    find_control_flow_obfuscation,
+    find_arithmetic_obfuscation,
+    find_minification,
+    find_dynamic_code_generation,
+    find_string_concatenation,
+)
 import tempfile
 import subprocess
 import os
