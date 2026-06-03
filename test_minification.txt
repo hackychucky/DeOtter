@@ -1,2 +1,0 @@
-// Minified Code Example
-function a(b,c){return b+c}var d=10,e=20;console.log(a(d,e));

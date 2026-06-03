@@ -1,7 +1,0 @@
-// Arithmetic Obfuscation Example
-
-var result = 2 * 3 + 4 - 1; // Simple arithmetic
-var obfuscatedResult = 2 * (3 + 4) - 1; // Obfuscated arithmetic expression
-
-console.log(result); // Output: 9
-console.log(eval("2 * (3 + 4) - 1")); // Output: 13 (using eval for obfuscation)

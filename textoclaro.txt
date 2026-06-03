@@ -1,4 +1,0 @@
-Hello, this is DeOtter, the DeObfuscation tool for Cyber Security Analysts - Developed with ❤ from Spain by @HackyChucky
-Texto sin ofuscar: console.log("Hello, world! " + 123);
-Texto ofuscado HEX: console.log("If you can read this, it means Deotter was successful against Hex Encoding Obfuscation")
-

@@ -1,5 +1,11 @@
+body {
+  margin: 0;
+  transition: background-color 0.2s ease, color 0.2s ease;
+}
+
 .App {
   text-align: center;
+  transition: background-color 0.2s ease, color 0.2s ease;
 }
 
 .App-logo {
@@ -35,4 +41,31 @@
   to {
     transform: rotate(360deg);
   }
+}
+
+/* Unified button system — themed via CSS custom properties set on the App root */
+.deotter-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 9px 20px;
+  font-size: 0.95rem;
+  font-family: 'Fira Code', monospace;
+  cursor: pointer;
+  border-radius: 20px;
+  border: 1px solid var(--btn-border, #cccccc);
+  background-color: var(--btn-bg, #f0f0f0);
+  color: var(--btn-text, #111111);
+  transition: filter 0.15s ease, opacity 0.15s ease;
+  margin: 0 6px;
+  white-space: nowrap;
+}
+
+.deotter-btn:hover:not(:disabled) {
+  filter: brightness(0.82);
+}
+
+.deotter-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
 }
