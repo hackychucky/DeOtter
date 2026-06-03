@@ -13,6 +13,8 @@ import subprocess
 import os
 import json
 import anthropic
+from db import init_db
+from auth import auth_bp, require_auth
 
 # Load preconfigured models
 CONFIG_PATH = os.path.join(os.path.dirname(__file__), "models_config.json")
@@ -93,12 +95,15 @@ def build_prompt(code, selected_pairs, detected_patterns):
 
 app = Flask(__name__)
 CORS(app)  # Allows connections from React (localhost:3000)
+app.register_blueprint(auth_bp)
+init_db()
 
 
 # ------------------------------
 # GENERATE REPORT ENDPOINT
 # ------------------------------
 @app.route('/generate-report', methods=['POST'])
+@require_auth
 def gen_report_endpoint():
     data = request.json
     code = data.get('code', '')
@@ -116,6 +121,7 @@ def gen_report_endpoint():
 # DEOBFUSCATE ENDPOINT
 # ------------------------------
 @app.route('/deobfuscate', methods=['POST'])
+@require_auth
 def deobfuscate_code():
     data = request.get_json()
     code = data.get('code', '')
@@ -155,6 +161,7 @@ TOKENIZER = None
 # ENDPOINT FOR LOADING MODEL
 # ------------------------------
 @app.route("/load-model", methods=["POST"])
+@require_auth
 def load_model():
     global MODEL, TOKENIZER
 
@@ -183,6 +190,7 @@ def load_model():
 # ------------------------------
 
 @app.route("/train-model", methods=["POST"])
+@require_auth
 def train_model():
     try:
         data = request.get_json()
@@ -197,6 +205,7 @@ def train_model():
 # ------------------------------
 
 @app.route("/ai-deobfuscate", methods=["POST"])
+@require_auth
 def ai_deobfuscate():
     try:
         data = request.get_json()
@@ -233,6 +242,7 @@ def ai_deobfuscate():
 
 
 @app.route("/available-models", methods=["GET"])
+@require_auth
 def available_models():
     try:
         models = list(MODEL_PATHS.keys())
