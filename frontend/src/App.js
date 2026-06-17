@@ -25,7 +25,7 @@ async function authFetch(token, url, options = {}, onUnauthorized) {
 // ------------------------------
 // Login / Sign-up Page
 // ------------------------------
-function LoginPage({ onLogin, theme }) {
+function LoginPage({ onLogin, theme, darkMode, logoOverride }) {
   const [mode, setMode] = useState("signin");
   const [username, setUsername] = useState("");
   const [email, setEmail] = useState("");
@@ -93,7 +93,19 @@ function LoginPage({ onLogin, theme }) {
       backgroundColor: theme.bg, color: theme.text,
       padding: "2rem",
     }}>
-      <img src="/deotterlogo1.png" alt="DeOtter" style={{ width: "380px", marginBottom: "1.2rem" }} />
+      <div style={{ display: "flex", flexDirection: "column", alignItems: "center", marginBottom: "1.2rem" }}>
+        <img
+          src={logoOverride ? `/${logoOverride}` : (darkMode ? "/deotterlogo_whitecontour.png" : "/999fbba3-83ed-4298-ba83-0747b9bfd1cc-2.png")}
+          alt="DeOtter"
+          style={{ width: "380px" }}
+        />
+        <span style={{
+          fontFamily: '"Fira Code", monospace', fontWeight: "bold",
+          fontSize: "2rem", letterSpacing: "0.08em",
+          color: darkMode ? "#ffffff" : "#1a1a1a",
+          marginTop: "0.4rem",
+        }}>DeOtter</span>
+      </div>
 
       {/* Sign In / Sign Up toggle */}
       <div style={{ display: "flex", marginBottom: "1.5rem", border: `1px solid ${theme.selectBorder}`, borderRadius: "24px", overflow: "hidden" }}>
@@ -214,13 +226,25 @@ function DeobfuscatePage({
   availableModels, selectedModel, setSelectedModel,
   handleDeobfuscate, handleGenerateReport, handleAIDeobfuscate, handleLoadModel,
   showFeedback, handleGood, handleBad,
-  usePairs, setUsePairs, pairsCount, theme,
+  usePairs, setUsePairs, pairsCount, theme, darkMode, logoOverride,
 }) {
   const highlight = (c) => Prism.highlight(c, Prism.languages.javascript, "javascript");
 
   return (
     <div>
-      <img src="/deotterlogo1.png" alt="Logo" style={{ width: "560px", marginBottom: "0.5rem" }} />
+      <div style={{ display: "inline-flex", flexDirection: "column", alignItems: "center", marginBottom: "0.5rem" }}>
+        <img
+          src={logoOverride ? `/${logoOverride}` : (darkMode ? "/deotterlogo_whitecontour.png" : "/999fbba3-83ed-4298-ba83-0747b9bfd1cc-2.png")}
+          alt="DeOtter"
+          style={{ width: "560px" }}
+        />
+        <span style={{
+          fontFamily: '"Fira Code", monospace', fontWeight: "bold",
+          fontSize: "2.4rem", letterSpacing: "0.08em",
+          color: darkMode ? "#ffffff" : "#1a1a1a",
+          marginTop: "0.3rem",
+        }}>DeOtter</span>
+      </div>
       <p style={{ fontFamily: '"Fira Code", monospace', fontSize: "1.1rem", marginTop: "0.3rem", marginBottom: "0.6rem" }}>
         DeObfuscation tool for Cyber Security Analysts <br />
         Developed with ❤ from Spain by <strong>@HackyChucky</strong>
@@ -294,9 +318,260 @@ function DeobfuscatePage({
 }
 
 // ------------------------------
+// Settings Modal
+// ------------------------------
+function SettingsModal({ token, currentUser, theme, onClose, onUnauth, onLogoSaved }) {
+  const isAdmin = currentUser.role === "admin";
+  const [provider, setProvider] = useState("anthropic");
+  const [anthropicKey, setAnthropicKey] = useState("");
+  const [azureEndpoint, setAzureEndpoint] = useState("");
+  const [azureKey, setAzureKey] = useState("");
+  const [azureDeployment, setAzureDeployment] = useState("gpt-4o");
+  const [azureVersion, setAzureVersion] = useState("2024-12-01-preview");
+  const [hints, setHints] = useState({ anthropic: "", azure: "" });
+  const [saving, setSaving] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [msg, setMsg] = useState({ text: "", ok: true });
+  const [logoFiles, setLogoFiles] = useState([]);
+  const [logoOverride, setLogoOverride] = useState("");
+  const [uploading, setUploading] = useState(false);
+  const [uploadMsg, setUploadMsg] = useState({ text: "", ok: true });
+  const fileInputRef = useRef(null);
+
+  useEffect(() => {
+    Promise.all([
+      authFetch(token, `${API}/settings/ai`, {}, onUnauth).then(r => r.json()),
+      authFetch(token, `${API}/settings/logo-files`, {}, onUnauth).then(r => r.json()),
+    ]).then(([ai, lf]) => {
+      setProvider(ai.provider || "anthropic");
+      setAzureEndpoint(ai.azure_endpoint || "");
+      setAzureDeployment(ai.azure_deployment || "gpt-4o");
+      setAzureVersion(ai.azure_version || "2024-12-01-preview");
+      setHints({ anthropic: ai.anthropic_key_hint || "", azure: ai.azure_key_hint || "" });
+      setLogoOverride(ai.logo_override || "");
+      setLogoFiles(lf.files || []);
+      setLoading(false);
+    }).catch(() => setLoading(false));
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const handleSave = async () => {
+    setSaving(true); setMsg({ text: "", ok: true });
+    const payload = { provider, azure_endpoint: azureEndpoint, azure_deployment: azureDeployment, azure_version: azureVersion, logo_override: logoOverride };
+    if (anthropicKey.trim()) payload.anthropic_key = anthropicKey.trim();
+    if (azureKey.trim()) payload.azure_key = azureKey.trim();
+    try {
+      const res = await authFetch(token, `${API}/settings/ai`, { method: "POST", body: JSON.stringify(payload) }, onUnauth);
+      const data = await res.json();
+      if (res.ok) {
+        setMsg({ text: "Settings saved.", ok: true });
+        if (anthropicKey.trim()) { setHints(h => ({ ...h, anthropic: "..." + anthropicKey.slice(-4) })); setAnthropicKey(""); }
+        if (azureKey.trim()) { setHints(h => ({ ...h, azure: "..." + azureKey.slice(-4) })); setAzureKey(""); }
+        if (onLogoSaved) onLogoSaved(logoOverride);
+      } else {
+        setMsg({ text: data.error || "Save failed.", ok: false });
+      }
+    } catch { setMsg({ text: "Could not reach server.", ok: false }); }
+    setSaving(false);
+  };
+
+  const handleUpload = async (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    e.target.value = "";
+    const ext = file.name.split(".").pop().toLowerCase();
+    if (!["png", "jpg", "jpeg"].includes(ext)) {
+      setUploadMsg({ text: "Only PNG and JPG files are accepted.", ok: false });
+      return;
+    }
+    setUploading(true);
+    setUploadMsg({ text: "", ok: true });
+    const formData = new FormData();
+    formData.append("file", file);
+    try {
+      const res = await fetch(`${API}/settings/upload-logo`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}` },
+        body: formData,
+      });
+      const data = await res.json();
+      if (res.ok) {
+        setLogoFiles(prev => prev.includes(data.filename) ? prev : [...prev, data.filename].sort());
+        setLogoOverride(data.filename);
+        setUploadMsg({ text: `"${data.filename}" uploaded.`, ok: true });
+      } else {
+        setUploadMsg({ text: data.error || "Upload failed.", ok: false });
+      }
+    } catch { setUploadMsg({ text: "Could not reach server.", ok: false }); }
+    setUploading(false);
+  };
+
+  const fieldStyle = (extra = {}) => ({
+    width: "100%", padding: "9px 14px", fontSize: "0.88rem",
+    fontFamily: '"Fira Code", monospace', borderRadius: "20px",
+    border: `1px solid ${theme.selectBorder}`,
+    backgroundColor: theme.selectBg, color: theme.selectColor,
+    boxSizing: "border-box", outline: "none",
+    opacity: isAdmin ? 1 : 0.4,
+    cursor: isAdmin ? "text" : "not-allowed",
+    ...extra,
+  });
+
+  const labelStyle = { fontSize: "0.78rem", color: theme.subtext, marginBottom: "2px", display: "block" };
+
+  return (
+    <div
+      onClick={e => { if (e.target === e.currentTarget) onClose(); }}
+      style={{ position: "fixed", inset: 0, zIndex: 3000, backgroundColor: "rgba(0,0,0,0.55)", display: "flex", alignItems: "center", justifyContent: "center" }}
+    >
+      <div style={{ backgroundColor: theme.bg, border: `1px solid ${theme.selectBorder}`, borderRadius: "14px", padding: "1.8rem", width: "100%", maxWidth: "460px", fontFamily: '"Fira Code", monospace', color: theme.text, boxShadow: "0 8px 32px rgba(0,0,0,0.25)" }}>
+
+        {/* Header */}
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "1.4rem" }}>
+          <h2 style={{ margin: 0, fontSize: "1.05rem" }}>Settings</h2>
+          <button onClick={onClose} className="deotter-btn" style={{ padding: "4px 12px", margin: 0 }}>✕</button>
+        </div>
+
+        {loading ? <p style={{ color: theme.subtext }}>Loading…</p> : (
+          <>
+            {/* Section title */}
+            <div style={{ display: "flex", alignItems: "center", gap: "10px", marginBottom: "1rem" }}>
+              <span style={{ fontSize: "0.78rem", color: theme.subtext, textTransform: "uppercase", letterSpacing: "0.08em" }}>AI Provider</span>
+              {!isAdmin && (
+                <span style={{ fontSize: "0.75rem", color: "#dc3545", border: "1px solid #dc3545", borderRadius: "20px", padding: "1px 8px" }}>
+                  admin only
+                </span>
+              )}
+            </div>
+
+            {/* Provider toggle */}
+            <div style={{ display: "flex", marginBottom: "1.2rem", border: `1px solid ${theme.selectBorder}`, borderRadius: "24px", overflow: "hidden", opacity: isAdmin ? 1 : 0.4, pointerEvents: isAdmin ? "auto" : "none" }}>
+              <button onClick={() => setProvider("anthropic")} className="deotter-btn"
+                style={{ borderRadius: "24px 0 0 24px", margin: 0, flex: 1, border: "none", opacity: provider === "anthropic" ? 1 : 0.5 }}>
+                Anthropic Claude
+              </button>
+              <button onClick={() => setProvider("azure")} className="deotter-btn"
+                style={{ borderRadius: "0 24px 24px 0", margin: 0, flex: 1, border: "none", borderLeft: `1px solid ${theme.selectBorder}`, opacity: provider === "azure" ? 1 : 0.5 }}>
+                Azure AI Foundry
+              </button>
+            </div>
+
+            {/* Provider fields */}
+            <div style={{ display: "flex", flexDirection: "column", gap: "0.6rem", pointerEvents: isAdmin ? "auto" : "none" }}>
+              {provider === "anthropic" && (
+                <>
+                  <label style={labelStyle}>
+                    API Key{hints.anthropic && <span style={{ marginLeft: 6, opacity: 0.7 }}>({hints.anthropic})</span>}
+                  </label>
+                  <input style={fieldStyle()} type="password"
+                    placeholder={hints.anthropic ? "Leave blank to keep existing key" : "sk-ant-..."}
+                    value={anthropicKey} onChange={e => setAnthropicKey(e.target.value)} disabled={!isAdmin} />
+                </>
+              )}
+
+              {provider === "azure" && (
+                <>
+                  <label style={labelStyle}>Endpoint</label>
+                  <input style={fieldStyle()} type="text" placeholder="https://YOUR-RESOURCE.openai.azure.com/"
+                    value={azureEndpoint} onChange={e => setAzureEndpoint(e.target.value)} disabled={!isAdmin} />
+
+                  <label style={labelStyle}>
+                    API Key{hints.azure && <span style={{ marginLeft: 6, opacity: 0.7 }}>({hints.azure})</span>}
+                  </label>
+                  <input style={fieldStyle()} type="password"
+                    placeholder={hints.azure ? "Leave blank to keep existing key" : "Your Azure API key"}
+                    value={azureKey} onChange={e => setAzureKey(e.target.value)} disabled={!isAdmin} />
+
+                  <label style={labelStyle}>Deployment Name</label>
+                  <input style={fieldStyle()} type="text" placeholder="gpt-4o"
+                    value={azureDeployment} onChange={e => setAzureDeployment(e.target.value)} disabled={!isAdmin} />
+
+                  <label style={labelStyle}>API Version</label>
+                  <input style={fieldStyle()} type="text" placeholder="2024-12-01-preview"
+                    value={azureVersion} onChange={e => setAzureVersion(e.target.value)} disabled={!isAdmin} />
+                </>
+              )}
+            </div>
+
+            {/* Logo section */}
+            <div style={{ marginTop: "1.4rem", borderTop: `1px solid ${theme.selectBorder}`, paddingTop: "1.2rem" }}>
+              <div style={{ display: "flex", alignItems: "center", gap: "10px", marginBottom: "0.8rem" }}>
+                <span style={{ fontSize: "0.78rem", color: theme.subtext, textTransform: "uppercase", letterSpacing: "0.08em" }}>Logo</span>
+                {!isAdmin && (
+                  <span style={{ fontSize: "0.75rem", color: "#dc3545", border: "1px solid #dc3545", borderRadius: "20px", padding: "1px 8px" }}>
+                    admin only
+                  </span>
+                )}
+              </div>
+              <div style={{ pointerEvents: isAdmin ? "auto" : "none", opacity: isAdmin ? 1 : 0.4 }}>
+                <label style={labelStyle}>Select logo (PNG / JPG from public folder)</label>
+                <select
+                  value={logoOverride}
+                  onChange={e => setLogoOverride(e.target.value)}
+                  disabled={!isAdmin}
+                  style={{ ...fieldStyle({ cursor: isAdmin ? "pointer" : "not-allowed" }), marginBottom: "0.6rem" }}
+                >
+                  <option value="">— Default (dark/light mode logos) —</option>
+                  {logoFiles.map(f => (
+                    <option key={f} value={f}>{f}</option>
+                  ))}
+                </select>
+
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  accept=".png,.jpg,.jpeg"
+                  style={{ display: "none" }}
+                  onChange={handleUpload}
+                />
+                <button
+                  className="deotter-btn"
+                  onClick={() => fileInputRef.current && fileInputRef.current.click()}
+                  disabled={uploading}
+                  style={{ margin: "0 0 0.6rem 0", width: "100%" }}
+                >
+                  {uploading ? "Uploading…" : "Upload new logo…"}
+                </button>
+
+                {uploadMsg.text && (
+                  <p style={{ color: uploadMsg.ok ? "#28a745" : "#dc3545", fontSize: "0.82rem", margin: "0 0 0.4rem" }}>
+                    {uploadMsg.text}
+                  </p>
+                )}
+
+                {logoOverride && (
+                  <div style={{ textAlign: "center" }}>
+                    <img
+                      src={`/${logoOverride}`}
+                      alt="preview"
+                      style={{ maxWidth: "100%", maxHeight: "120px", objectFit: "contain", borderRadius: "8px", border: `1px solid ${theme.selectBorder}` }}
+                    />
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {msg.text && (
+              <p style={{ color: msg.ok ? "#28a745" : "#dc3545", fontSize: "0.85rem", margin: "1rem 0 0" }}>{msg.text}</p>
+            )}
+
+            {isAdmin && (
+              <button className="deotter-btn" onClick={handleSave} disabled={saving}
+                style={{ marginTop: "1.4rem", marginLeft: 0, width: "100%" }}>
+                {saving ? "Saving…" : "Save Settings"}
+              </button>
+            )}
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ------------------------------
 // Gear Dropdown
 // ------------------------------
-function GearMenu({ username, role, onLogout, theme }) {
+function GearMenu({ username, role, onLogout, onSettings, theme }) {
   const [open, setOpen] = useState(false);
   const ref = useRef(null);
 
@@ -333,6 +608,19 @@ function GearMenu({ username, role, onLogout, theme }) {
             <div style={{ fontWeight: "bold", color: theme.text }}>{username}</div>
             <div style={{ fontSize: "0.75rem" }}>{role}</div>
           </div>
+          <button
+            onClick={() => { setOpen(false); onSettings(); }}
+            style={{
+              width: "100%", padding: "10px 14px",
+              background: "none", border: "none",
+              borderBottom: `1px solid ${theme.selectBorder}`,
+              color: theme.text, cursor: "pointer",
+              textAlign: "left", fontFamily: '"Fira Code", monospace',
+              fontSize: "0.85rem",
+            }}
+          >
+            Settings
+          </button>
           <button
             onClick={() => { setOpen(false); onLogout(); }}
             style={{
@@ -377,6 +665,8 @@ function App() {
   const [lastAIPatterns, setLastAIPatterns] = useState([]);
   const [showFeedback, setShowFeedback] = useState(false);
   const [usePairs, setUsePairs] = useState(false);
+  const [showSettings, setShowSettings] = useState(false);
+  const [logoOverride, setLogoOverride] = useState("");
   const [darkMode, setDarkMode] = useState(() => {
     try { return localStorage.getItem("deotter_dark") === "true"; }
     catch { return false; }
@@ -416,6 +706,10 @@ function App() {
     authFetch(token, `${API}/available-models`, {}, handleLogout)
       .then(r => r.json())
       .then(d => { if (d.models) setAvailableModels(d.models); })
+      .catch(() => {});
+    authFetch(token, `${API}/settings/ai`, {}, handleLogout)
+      .then(r => r.json())
+      .then(d => { if (d.logo_override !== undefined) setLogoOverride(d.logo_override); })
       .catch(() => {});
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [token]);
@@ -484,7 +778,7 @@ function App() {
   if (!token || !currentUser) {
     return (
       <div className="App" style={{ backgroundColor: theme.bg, color: theme.text, minHeight: "100vh", ...cssVars }}>
-        <LoginPage onLogin={handleLogin} theme={theme} />
+        <LoginPage onLogin={handleLogin} theme={theme} darkMode={darkMode} logoOverride={logoOverride} />
       </div>
     );
   }
@@ -497,7 +791,7 @@ function App() {
         <span style={{ fontFamily: '"Fira Code", monospace', fontSize: "0.85rem", color: theme.subtext }}>
           {currentUser.username}
         </span>
-        <GearMenu username={currentUser.username} role={currentUser.role} onLogout={handleLogout} theme={theme} />
+        <GearMenu username={currentUser.username} role={currentUser.role} onLogout={handleLogout} onSettings={() => setShowSettings(true)} theme={theme} />
         <button
           onClick={() => setDarkMode(d => !d)}
           title={darkMode ? "Switch to light mode" : "Switch to dark mode"}
@@ -526,6 +820,17 @@ function App() {
         <button className="deotter-btn" style={{ opacity: tab === "train" ? 1 : 0.55 }} onClick={() => setTab("train")}>Train</button>
       </div>
 
+      {showSettings && (
+        <SettingsModal
+          token={token}
+          currentUser={currentUser}
+          theme={theme}
+          onClose={() => setShowSettings(false)}
+          onUnauth={handleLogout}
+          onLogoSaved={setLogoOverride}
+        />
+      )}
+
       {tab === "deobfuscate" ? (
         <DeobfuscatePage
           code={code} setCode={setCode} report={report} setReport={setReport}
@@ -535,6 +840,8 @@ function App() {
           showFeedback={showFeedback} handleGood={handleGood} handleBad={handleBad}
           usePairs={usePairs} setUsePairs={setUsePairs} pairsCount={trainPairs.length}
           theme={theme}
+          darkMode={darkMode}
+          logoOverride={logoOverride}
         />
       ) : (
         <TrainingPage

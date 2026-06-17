@@ -24,7 +24,6 @@ import tempfile
 import subprocess
 import os
 import json
-import anthropic
 from db import init_db
 from auth import auth_bp, require_auth
 
@@ -213,8 +212,60 @@ def train_model():
 
 
 # ------------------------------
-# ENDPOINT FOR AI DEOBFUSCATE (Claude / Anthropic API)
+# ENDPOINT FOR AI DEOBFUSCATE (Azure AI Foundry or Anthropic)
 # ------------------------------
+
+def _call_ai(prompt):
+    """
+    Call whichever AI provider is configured.
+    DB settings (set via the Settings UI) take priority over environment variables.
+    """
+    from db import get_setting
+
+    provider = get_setting("ai_provider")  # "azure" | "anthropic" | ""
+
+    # Credentials — DB overrides env vars
+    azure_endpoint = get_setting("azure_endpoint") or os.environ.get("AZURE_OPENAI_ENDPOINT", "")
+    azure_key      = get_setting("azure_key")      or os.environ.get("AZURE_OPENAI_API_KEY", "")
+    azure_deploy   = get_setting("azure_deployment") or os.environ.get("AZURE_OPENAI_DEPLOYMENT", "gpt-4o")
+    azure_version  = get_setting("azure_version")  or os.environ.get("AZURE_OPENAI_API_VERSION", "2024-12-01-preview")
+    anthropic_key  = get_setting("anthropic_key")  or os.environ.get("ANTHROPIC_API_KEY", "")
+
+    # Auto-detect provider when not explicitly set
+    if not provider:
+        if azure_endpoint and azure_key:
+            provider = "azure"
+        elif anthropic_key:
+            provider = "anthropic"
+
+    if provider == "azure":
+        if not azure_endpoint or not azure_key:
+            raise RuntimeError("Azure AI Foundry is selected but the endpoint or API key is not configured. Open Settings to complete the setup.")
+        from openai import AzureOpenAI
+        client = AzureOpenAI(azure_endpoint=azure_endpoint, api_key=azure_key, api_version=azure_version)
+        response = client.chat.completions.create(
+            model=azure_deploy,
+            messages=[{"role": "user", "content": prompt}],
+            max_tokens=4096,
+        )
+        return response.choices[0].message.content, "azure"
+
+    if provider == "anthropic":
+        if not anthropic_key:
+            raise RuntimeError("Anthropic is selected but the API key is not configured. Open Settings to complete the setup.")
+        import anthropic as anthropic_module
+        client = anthropic_module.Anthropic(api_key=anthropic_key)
+        message = client.messages.create(
+            model="claude-sonnet-4-6",
+            max_tokens=4096,
+            messages=[{"role": "user", "content": prompt}],
+        )
+        return message.content[0].text, "anthropic"
+
+    raise RuntimeError(
+        "No AI provider configured. An admin must open Settings and enter the API credentials."
+    )
+
 
 @app.route("/ai-deobfuscate", methods=["POST"])
 @require_auth
@@ -226,31 +277,103 @@ def ai_deobfuscate():
         if not code:
             return jsonify({"error": "No code provided"}), 400
 
-        api_key = os.environ.get("ANTHROPIC_API_KEY")
-        if not api_key:
-            return jsonify({"error": "ANTHROPIC_API_KEY not set in environment"}), 500
-
-        client = anthropic.Anthropic(api_key=api_key)
         pairs = data.get("pairs", [])
         detected_patterns = detect_patterns(code)
         selected = select_pairs(pairs, detected_patterns)
         prompt = build_prompt(code, selected, detected_patterns)
 
-        message = client.messages.create(
-            model="claude-sonnet-4-6",
-            max_tokens=4096,
-            messages=[{"role": "user", "content": prompt}],
-        )
-
-        deobfuscated = message.content[0].text
+        deobfuscated, provider = _call_ai(prompt)
         return jsonify({
             "deobfuscated": deobfuscated,
             "patterns": detected_patterns,
             "examples_used": len(selected),
+            "provider": provider,
         })
 
+    except RuntimeError as e:
+        return jsonify({"error": str(e)}), 500
     except Exception as e:
         return jsonify({"error": str(e)}), 500
+
+
+# ------------------------------
+# SETTINGS ENDPOINTS
+# ------------------------------
+
+@app.route("/settings/ai", methods=["GET"])
+@require_auth
+def get_ai_settings():
+    from db import get_setting
+    anthropic_key = get_setting("anthropic_key")
+    azure_key     = get_setting("azure_key")
+    def hint(k):
+        return f"...{k[-4:]}" if len(k) > 4 else ("set" if k else "")
+    return jsonify({
+        "provider":           get_setting("ai_provider") or "anthropic",
+        "anthropic_key_set":  bool(anthropic_key),
+        "anthropic_key_hint": hint(anthropic_key),
+        "azure_endpoint":     get_setting("azure_endpoint"),
+        "azure_key_set":      bool(azure_key),
+        "azure_key_hint":     hint(azure_key),
+        "azure_deployment":   get_setting("azure_deployment") or "gpt-4o",
+        "azure_version":      get_setting("azure_version") or "2024-12-01-preview",
+        "logo_override":      get_setting("logo_override") or "",
+    })
+
+
+@app.route("/settings/ai", methods=["POST"])
+@require_auth
+def save_ai_settings():
+    if request.current_user.get("role") != "admin":
+        return jsonify({"error": "Admin access required"}), 403
+    from db import set_setting
+    data = request.get_json() or {}
+    set_setting("ai_provider",    data.get("provider", "").strip())
+    set_setting("azure_endpoint", data.get("azure_endpoint", "").strip())
+    set_setting("azure_deployment", data.get("azure_deployment", "").strip())
+    set_setting("azure_version",  data.get("azure_version", "").strip())
+    if data.get("anthropic_key", "").strip():
+        set_setting("anthropic_key", data["anthropic_key"].strip())
+    if data.get("azure_key", "").strip():
+        set_setting("azure_key", data["azure_key"].strip())
+    if "logo_override" in data:
+        set_setting("logo_override", data["logo_override"].strip())
+    return jsonify({"message": "Settings saved."})
+
+
+FRONTEND_PUBLIC = os.path.join(os.path.dirname(__file__), '..', 'frontend', 'public')
+
+
+@app.route("/settings/logo-files", methods=["GET"])
+@require_auth
+def logo_files():
+    try:
+        files = sorted([
+            f for f in os.listdir(FRONTEND_PUBLIC)
+            if f.lower().endswith(('.png', '.jpg', '.jpeg'))
+        ])
+        return jsonify({"files": files})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/settings/upload-logo", methods=["POST"])
+@require_auth
+def upload_logo():
+    if request.current_user.get("role") != "admin":
+        return jsonify({"error": "Admin access required"}), 403
+    if "file" not in request.files:
+        return jsonify({"error": "No file provided"}), 400
+    f = request.files["file"]
+    if not f.filename:
+        return jsonify({"error": "No file selected"}), 400
+    from werkzeug.utils import secure_filename
+    filename = secure_filename(f.filename)
+    ext = os.path.splitext(filename)[1].lower()
+    if ext not in ('.png', '.jpg', '.jpeg'):
+        return jsonify({"error": "Only PNG and JPG files are accepted"}), 400
+    f.save(os.path.join(FRONTEND_PUBLIC, filename))
+    return jsonify({"filename": filename})
 
 
 @app.route("/available-models", methods=["GET"])

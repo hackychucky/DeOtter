@@ -1,5 +1,88 @@
 # DeOtter – Developer Notes
 
+## Azure AI Foundry
+
+DeOtter can use **Azure AI Foundry** as its AI engine instead of (or alongside) the Anthropic API. When Azure environment variables are set, they take priority over Anthropic automatically — no code change needed.
+
+---
+
+### What is Azure AI Foundry?
+
+Azure AI Foundry (previously Azure OpenAI Service / Azure AI Studio) is Microsoft's managed AI platform. It lets you deploy and call AI models (GPT-4o, GPT-4, and others) through your company's Azure subscription, keeping data within your Azure tenant and complying with corporate security policies.
+
+---
+
+### How to set it up
+
+#### 1 — Deploy a model in Azure AI Foundry
+
+1. Go to [https://ai.azure.com](https://ai.azure.com) and sign in with your Azure account.
+2. Create or open a **Hub** → create a **Project**.
+3. In the left sidebar go to **Deployments** → **Deploy model**.
+4. Choose a model (e.g. `gpt-4o`) and give the deployment a name (e.g. `gpt-4o`).
+5. Once deployed, go to the deployment details page and copy:
+   - **Endpoint** — looks like `https://YOUR-RESOURCE.openai.azure.com/`
+   - **API Key** — under *Keys and Endpoint* in the Azure portal resource page
+   - **Deployment name** — the name you gave the deployment (e.g. `gpt-4o`)
+
+#### 2 — Set environment variables
+
+```bash
+export AZURE_OPENAI_ENDPOINT=https://YOUR-RESOURCE.openai.azure.com/
+export AZURE_OPENAI_API_KEY=your-key-here
+export AZURE_OPENAI_DEPLOYMENT=gpt-4o
+```
+
+Optional (defaults to `2024-12-01-preview`):
+```bash
+export AZURE_OPENAI_API_VERSION=2024-12-01-preview
+```
+
+#### 3 — Start Flask normally
+
+```bash
+python3 app.py
+```
+
+DeOtter detects the Azure variables and uses Azure AI Foundry automatically. No Anthropic key is needed.
+
+---
+
+### Provider priority
+
+| Azure vars set | Anthropic var set | Provider used |
+|:-:|:-:|---|
+| ✅ | ✅ | **Azure AI Foundry** |
+| ✅ | ❌ | **Azure AI Foundry** |
+| ❌ | ✅ | **Anthropic / Claude** |
+| ❌ | ❌ | Error — configure one |
+
+---
+
+### Required Python package
+
+```bash
+pip install openai
+```
+
+The `openai` Python package is used to call the Azure AI Foundry endpoint (Azure exposes an OpenAI-compatible API). It is included in the standard `pip install` command in the README.
+
+---
+
+### Why use Azure AI Foundry instead of Anthropic directly?
+
+| Concern | Azure AI Foundry | Anthropic direct |
+|---------|-----------------|-----------------|
+| Data residency | Stays in your Azure tenant/region | Sent to Anthropic's servers |
+| Billing | Through Azure subscription / EA | Direct Anthropic account |
+| SSO / access control | Azure AD / Entra ID | API key per user |
+| Compliance (GDPR, etc.) | Azure compliance portfolio | Anthropic's policies |
+| Model choice | GPT-4o, GPT-4, and more | Claude models only |
+
+For company deployments, Azure AI Foundry is usually preferred because data never leaves the corporate Azure environment.
+
+---
+
 ## How the Anthropic API Key Works
 
 ### What is an API key?

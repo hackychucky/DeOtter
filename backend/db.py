@@ -22,6 +22,12 @@ def init_db():
             role     TEXT NOT NULL DEFAULT 'user'
         )
     """)
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS settings (
+            key   TEXT PRIMARY KEY,
+            value TEXT NOT NULL DEFAULT ''
+        )
+    """)
     conn.commit()
     # Migrate: add email column for databases created before this version
     try:
@@ -36,6 +42,23 @@ def init_db():
             ("admin", "admin@localhost", generate_password_hash("admin", method="pbkdf2:sha256"), "admin"),
         )
         conn.commit()
+    conn.close()
+
+
+def get_setting(key, default=""):
+    conn = get_conn()
+    row = conn.execute("SELECT value FROM settings WHERE key = ?", (key,)).fetchone()
+    conn.close()
+    return row["value"] if row else default
+
+
+def set_setting(key, value):
+    conn = get_conn()
+    conn.execute(
+        "INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)",
+        (key, value),
+    )
+    conn.commit()
     conn.close()
 
 

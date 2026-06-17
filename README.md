@@ -109,34 +109,54 @@ source venv/bin/activate          # macOS / Linux
 # venv\Scripts\activate           # Windows
 
 # Install all dependencies
-pip install flask flask-cors anthropic PyJWT werkzeug
+pip install flask flask-cors anthropic openai PyJWT werkzeug
 ```
 
 ---
 
 ### Step 3 — Set environment variables
 
-```bash
-# Required for AI deobfuscation
-export ANTHROPIC_API_KEY=sk-ant-...
+DeOtter supports two AI providers. Set **one** of the two blocks below depending on which you use.
 
-# Recommended: set a stable JWT secret so sessions survive Flask restarts
-export DEOTTER_SECRET=some-long-random-string
+#### Option A — Azure AI Foundry (recommended for company deployments)
+
+```bash
+export AZURE_OPENAI_ENDPOINT=https://YOUR-RESOURCE.openai.azure.com/
+export AZURE_OPENAI_API_KEY=your-azure-key
+export AZURE_OPENAI_DEPLOYMENT=gpt-4o        # your deployment name in Foundry
+# export AZURE_OPENAI_API_VERSION=2024-12-01-preview  # optional, this is the default
 ```
 
 On **Windows (Command Prompt)**:
 ```cmd
-set ANTHROPIC_API_KEY=sk-ant-...
-set DEOTTER_SECRET=some-long-random-string
+set AZURE_OPENAI_ENDPOINT=https://YOUR-RESOURCE.openai.azure.com/
+set AZURE_OPENAI_API_KEY=your-azure-key
+set AZURE_OPENAI_DEPLOYMENT=gpt-4o
 ```
 
 On **Windows (PowerShell)**:
 ```powershell
-$env:ANTHROPIC_API_KEY="sk-ant-..."
-$env:DEOTTER_SECRET="some-long-random-string"
+$env:AZURE_OPENAI_ENDPOINT="https://YOUR-RESOURCE.openai.azure.com/"
+$env:AZURE_OPENAI_API_KEY="your-azure-key"
+$env:AZURE_OPENAI_DEPLOYMENT="gpt-4o"
 ```
 
-> To make these permanent, add them to your shell profile (`~/.bashrc`, `~/.zshrc`) or use a `.env` file. See `notes.md` for details.
+> See `notes.md` → *Azure AI Foundry* for how to find these values in the Azure portal.
+
+#### Option B — Anthropic / Claude (for personal or direct API use)
+
+```bash
+export ANTHROPIC_API_KEY=sk-ant-...
+```
+
+#### Always set — JWT secret
+
+```bash
+export DEOTTER_SECRET=some-long-random-string
+```
+
+> If both Azure and Anthropic variables are set, **Azure AI Foundry takes priority**.  
+> To make variables permanent, add them to your shell profile (`~/.bashrc`, `~/.zshrc`) or a `.env` file.
 
 ---
 
@@ -179,24 +199,30 @@ Frontend opens automatically at `http://localhost:3000`.
 
 ### Full command sequence (copy-paste for Linux/macOS)
 
+**With Azure AI Foundry:**
 ```bash
-# Clone
 git clone https://github.com/hackychucky/deotter.git
-cd DeOtter
+cd DeOtter/backend
+python3 -m venv venv && source venv/bin/activate
+pip install flask flask-cors anthropic openai PyJWT werkzeug
+export AZURE_OPENAI_ENDPOINT=https://YOUR-RESOURCE.openai.azure.com/
+export AZURE_OPENAI_API_KEY=your-azure-key
+export AZURE_OPENAI_DEPLOYMENT=gpt-4o
+export DEOTTER_SECRET=change-this-to-something-random
+python3 app.py &
+cd ../frontend && npm install && npm start
+```
 
-# Backend
-cd backend
-python3 -m venv venv
-source venv/bin/activate
-pip install flask flask-cors anthropic PyJWT werkzeug
+**With Anthropic / Claude:**
+```bash
+git clone https://github.com/hackychucky/deotter.git
+cd DeOtter/backend
+python3 -m venv venv && source venv/bin/activate
+pip install flask flask-cors anthropic openai PyJWT werkzeug
 export ANTHROPIC_API_KEY=sk-ant-...
 export DEOTTER_SECRET=change-this-to-something-random
 python3 app.py &
-
-# Frontend (in a new terminal tab)
-cd ../frontend
-npm install
-npm start
+cd ../frontend && npm install && npm start
 ```
 
 ---
