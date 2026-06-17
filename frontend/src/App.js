@@ -7,8 +7,8 @@ import "./App.css";
 
 const API = "http://127.0.0.1:5000";
 
-function authFetch(token, url, options = {}) {
-  return fetch(url, {
+async function authFetch(token, url, options = {}, onUnauthorized) {
+  const res = await fetch(url, {
     ...options,
     headers: {
       "Content-Type": "application/json",
@@ -16,6 +16,10 @@ function authFetch(token, url, options = {}) {
       ...(options.headers || {}),
     },
   });
+  if (res.status === 401 && onUnauthorized) {
+    onUnauthorized();
+  }
+  return res;
 }
 
 // ------------------------------
@@ -409,16 +413,17 @@ function App() {
 
   useEffect(() => {
     if (!token) return;
-    authFetch(token, `${API}/available-models`)
+    authFetch(token, `${API}/available-models`, {}, handleLogout)
       .then(r => r.json())
       .then(d => { if (d.models) setAvailableModels(d.models); })
       .catch(() => {});
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [token]);
 
   const handleGenerateReport = async () => {
     setShowFeedback(false);
     try {
-      const res = await authFetch(token, `${API}/generate-report`, { method: "POST", body: JSON.stringify({ code }) });
+      const res = await authFetch(token, `${API}/generate-report`, { method: "POST", body: JSON.stringify({ code }) }, handleLogout);
       const data = await res.json();
       setReport(res.ok ? data.report : `Error: ${data.error}`);
     } catch (err) { setReport(`Request failed: ${err.message}`); }
@@ -427,7 +432,7 @@ function App() {
   const handleDeobfuscate = async () => {
     setShowFeedback(false);
     try {
-      const res = await authFetch(token, `${API}/deobfuscate`, { method: "POST", body: JSON.stringify({ code }) });
+      const res = await authFetch(token, `${API}/deobfuscate`, { method: "POST", body: JSON.stringify({ code }) }, handleLogout);
       const data = await res.json();
       if (res.ok) {
         setLastAICode(code); setLastAIOutput(data.deobfuscated); setLastAIPatterns(data.patterns || []);
@@ -442,7 +447,7 @@ function App() {
       const res = await authFetch(token, `${API}/ai-deobfuscate`, {
         method: "POST",
         body: JSON.stringify({ code, pairs: usePairs ? trainPairs.slice(-5) : [] }),
-      });
+      }, handleLogout);
       const data = await res.json();
       if (res.ok) {
         setLastAICode(code); setLastAIOutput(data.deobfuscated); setLastAIPatterns(data.patterns || []);
@@ -463,7 +468,7 @@ function App() {
   const handleLoadModel = async () => {
     if (!selectedModel) return;
     try {
-      const res = await authFetch(token, `${API}/load-model`, { method: "POST", body: JSON.stringify({ model_name: selectedModel }) });
+      const res = await authFetch(token, `${API}/load-model`, { method: "POST", body: JSON.stringify({ model_name: selectedModel }) }, handleLogout);
       const data = await res.json();
       alert(res.ok ? data.message : `Error: ${data.error}`);
     } catch (err) { alert(`Request failed: ${err.message}`); }

@@ -12,6 +12,7 @@
 
 | Feature | Details |
 |---|---|
+| **User authentication** | Login / sign-up system with admin and user roles |
 | **Rule-based deobfuscation** | Decodes hex, base64, string arrays, arithmetic — no AI needed |
 | **Obfuscation report** | Detects 10 techniques and generates a detailed analysis |
 | **AI deobfuscation** | Powered by Claude (Anthropic API) |
@@ -19,6 +20,7 @@
 | **Pattern-aware AI** | Detected techniques guide which training examples are sent to Claude |
 | **Syntax-highlighted editor** | Input and output with JS highlighting |
 | **Training data portability** | Download and upload training pairs as JSON |
+| **Dark / light mode** | Full theme support, persisted across sessions |
 
 ---
 
@@ -46,82 +48,122 @@ DeOtter/
 ├── backend/
 │   ├── app.py               # Flask API
 │   ├── deotter.py           # Detection & deobfuscation engine
-│   ├── models_config.json   # Local model paths (optional)
-│   └── venv/
+│   ├── auth.py              # JWT authentication endpoints
+│   ├── db.py                # SQLite user database
+│   ├── manage_users.py      # CLI user management tool
+│   └── models_config.json   # Local model paths (optional)
 ├── frontend/
 │   ├── src/
 │   │   ├── App.js           # React UI
 │   │   └── ...
 │   └── package.json
-├── notes.md                 # Technical notes (API key, localStorage, etc.)
+├── notes.md                 # Technical notes
 └── README.md
 ```
 
 ---
 
-## Setup
+## Quick Start — VS Code on any machine
+
+These are the exact commands to get DeOtter running from scratch on a server or a new machine using VS Code.
 
 ### Prerequisites
 
-- Python 3.9+
-- Node.js 16+
+Install these first if not already present:
 
----
+| Tool | Version | Download |
+|------|---------|----------|
+| Git | any | https://git-scm.com |
+| Python | 3.9+ | https://python.org |
+| Node.js | 16+ | https://nodejs.org |
+| VS Code | any | https://code.visualstudio.com |
 
-### 1 — Clone the repository
+On **Ubuntu / Debian** you can install all at once:
 
 ```bash
-git clone https://github.com/hackychucky/deotter.git
-cd DeOtter
+sudo apt update && sudo apt install -y git python3 python3-pip python3-venv nodejs npm
 ```
 
 ---
 
-### 2 — Backend (Flask)
+### Step 1 — Clone and open in VS Code
+
+```bash
+git clone https://github.com/hackychucky/deotter.git
+cd DeOtter
+code .
+```
+
+VS Code will open the project. Use its integrated terminal (`Ctrl+` `` ` ``) for the remaining steps.
+
+---
+
+### Step 2 — Set up the backend
 
 ```bash
 cd backend
 
 # Create and activate virtual environment
 python3 -m venv venv
-source venv/bin/activate        # macOS / Linux
-venv\Scripts\activate           # Windows
+source venv/bin/activate          # macOS / Linux
+# venv\Scripts\activate           # Windows
 
-# Install dependencies
-pip install flask flask-cors anthropic
+# Install all dependencies
+pip install flask flask-cors anthropic PyJWT werkzeug
 ```
 
-> `transformers` and `torch` are optional — only needed if you want to load local models (CodeBERT, etc.).
+---
 
-#### Set your Anthropic API key
-
-The AI deobfuscation button requires a Claude API key from [console.anthropic.com](https://console.anthropic.com).
+### Step 3 — Set environment variables
 
 ```bash
-# macOS / Linux
+# Required for AI deobfuscation
 export ANTHROPIC_API_KEY=sk-ant-...
 
-# Windows (Command Prompt)
-set ANTHROPIC_API_KEY=sk-ant-...
-
-# Windows (PowerShell)
-$env:ANTHROPIC_API_KEY="sk-ant-..."
+# Recommended: set a stable JWT secret so sessions survive Flask restarts
+export DEOTTER_SECRET=some-long-random-string
 ```
 
-> The key is personal — tied to your account and billing. Never commit it to git.  
-> See `notes.md` for a full explanation of how the API key works and how to keep it safe.
+On **Windows (Command Prompt)**:
+```cmd
+set ANTHROPIC_API_KEY=sk-ant-...
+set DEOTTER_SECRET=some-long-random-string
+```
 
-#### Start the backend
+On **Windows (PowerShell)**:
+```powershell
+$env:ANTHROPIC_API_KEY="sk-ant-..."
+$env:DEOTTER_SECRET="some-long-random-string"
+```
+
+> To make these permanent, add them to your shell profile (`~/.bashrc`, `~/.zshrc`) or use a `.env` file. See `notes.md` for details.
+
+---
+
+### Step 4 — Start the backend
 
 ```bash
 python3 app.py
 ```
 
-Backend runs at `http://127.0.0.1:5000`
+Flask starts at `http://127.0.0.1:5000`. The user database (`users.db`) is created automatically on first run.
+
+**Default login credentials:**
+
+| Username | Password |
+|----------|----------|
+| `admin` | `admin` |
+
+> ⚠️ Change the admin password immediately after first login:
+> ```bash
+> python3 manage_users.py password admin yournewpassword
+> ```
 
 ---
 
-### 3 — Frontend (React)
+### Step 5 — Set up and start the frontend
+
+Open a **second terminal** in VS Code (`+` button in the terminal panel):
 
 ```bash
 cd frontend
@@ -129,9 +171,52 @@ npm install
 npm start
 ```
 
-Frontend runs at `http://localhost:3000`
+Frontend opens automatically at `http://localhost:3000`.
 
-> Keep both the Flask server and the React dev server running at the same time.
+> Both servers must be running at the same time. Keep both terminal tabs open.
+
+---
+
+### Full command sequence (copy-paste for Linux/macOS)
+
+```bash
+# Clone
+git clone https://github.com/hackychucky/deotter.git
+cd DeOtter
+
+# Backend
+cd backend
+python3 -m venv venv
+source venv/bin/activate
+pip install flask flask-cors anthropic PyJWT werkzeug
+export ANTHROPIC_API_KEY=sk-ant-...
+export DEOTTER_SECRET=change-this-to-something-random
+python3 app.py &
+
+# Frontend (in a new terminal tab)
+cd ../frontend
+npm install
+npm start
+```
+
+---
+
+## Managing Users
+
+DeOtter includes a CLI tool for user management. Run it from the `backend/` directory with the venv activated.
+
+```bash
+cd backend
+source venv/bin/activate
+
+python3 manage_users.py list                                      # list all users
+python3 manage_users.py create alice secret123                    # create user
+python3 manage_users.py create bob pass456 --role admin           # create admin
+python3 manage_users.py password alice newpassword                # change password
+python3 manage_users.py delete alice                              # delete user
+```
+
+See `notes.md` → *Users Management* for full details, including SSO and company email restriction.
 
 ---
 
@@ -139,12 +224,13 @@ Frontend runs at `http://localhost:3000`
 
 ### Deobfuscate tab
 
-1. Paste obfuscated JavaScript into the editor.
-2. Choose an action:
+1. Log in with your credentials.
+2. Paste obfuscated JavaScript into the editor.
+3. Choose an action:
    - **Deobfuscate** — rule-based engine, no API key required
    - **Create Obfuscation Report** — detailed technique breakdown
    - **Deobfuscate using DeOtter AI** — sends code to Claude for AI-powered analysis
-3. After any result, **Good / Bad** buttons appear:
+4. After any result, **Good / Bad** buttons appear:
    - **Good** — saves the input + output as a training pair (stored in your browser)
    - **Bad** — discards the output
 
@@ -173,6 +259,7 @@ Training pairs are stored in your **browser's localStorage** — they persist ac
 
 - The Flask backend must be running before using the frontend.
 - AI deobfuscation requires `ANTHROPIC_API_KEY` to be set in the environment where Flask runs.
+- Set `DEOTTER_SECRET` to a permanent value to avoid session expiry on Flask restarts.
 - Training pairs are local to the browser — use **Download** to back them up or move them to another machine.
 - Rule-based deobfuscation and report generation work fully offline with no API key.
 
