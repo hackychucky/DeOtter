@@ -1,516 +1,326 @@
-# DeOtter – Developer Notes
+# DeOtter — Developer Notes
 
-## Azure AI Foundry
-
-DeOtter can use **Azure AI Foundry** as its AI engine instead of (or alongside) the Anthropic API. When Azure environment variables are set, they take priority over Anthropic automatically — no code change needed.
+This file is for the developer only. It is listed in `.gitignore` and never committed.
 
 ---
 
-### What is Azure AI Foundry?
+## Architecture Overview
 
-Azure AI Foundry (previously Azure OpenAI Service / Azure AI Studio) is Microsoft's managed AI platform. It lets you deploy and call AI models (GPT-4o, GPT-4, and others) through your company's Azure subscription, keeping data within your Azure tenant and complying with corporate security policies.
+### Stack
 
----
+| Layer | Technology |
+|-------|-----------|
+| Frontend | React (CRA), inline styles, CSS custom properties |
+| Backend | Flask + Flask-CORS, Python 3.9+ |
+| Database | SQLite via `sqlite3` (no ORM) |
+| Auth | JWT (PyJWT), password hashing via werkzeug (pbkdf2:sha256) |
+| AI (cloud) | Anthropic Claude SDK, OpenAI SDK (also used for Azure Foundry) |
+| AI (local) | HuggingFace Transformers + PyTorch |
+| Start | `concurrently` in package.json runs both Flask and React with `npm start` |
 
-### How to set it up
+### Ports
 
-#### 1 — Deploy a model in Azure AI Foundry
+- Flask: **5001** (5000 is occupied by macOS AirPlay Receiver / ControlCenter)
+- React: **3000**
 
-1. Go to [https://ai.azure.com](https://ai.azure.com) and sign in with your Azure account.
-2. Create or open a **Hub** → create a **Project**.
-3. In the left sidebar go to **Deployments** → **Deploy model**.
-4. Choose a model (e.g. `gpt-4o`) and give the deployment a name (e.g. `gpt-4o`).
-5. Once deployed, go to the deployment details page and copy:
-   - **Endpoint** — looks like `https://YOUR-RESOURCE.openai.azure.com/`
-   - **API Key** — under *Keys and Endpoint* in the Azure portal resource page
-   - **Deployment name** — the name you gave the deployment (e.g. `gpt-4o`)
+### Key files
 
-#### 2 — Set environment variables
-
-```bash
-export AZURE_OPENAI_ENDPOINT=https://YOUR-RESOURCE.openai.azure.com/
-export AZURE_OPENAI_API_KEY=your-key-here
-export AZURE_OPENAI_DEPLOYMENT=gpt-4o
-```
-
-Optional (defaults to `2024-12-01-preview`):
-```bash
-export AZURE_OPENAI_API_VERSION=2024-12-01-preview
-```
-
-#### 3 — Start Flask normally
-
-```bash
-python3 app.py
-```
-
-DeOtter detects the Azure variables and uses Azure AI Foundry automatically. No Anthropic key is needed.
+| File | Role |
+|------|------|
+| `backend/app.py` | All Flask routes, AI provider logic, settings endpoints |
+| `backend/auth.py` | JWT creation/decode, `@require_auth` decorator, `/auth/login`, `/auth/register` |
+| `backend/db.py` | SQLite schema, CRUD helpers, password hashing, settings k/v store |
+| `backend/deotter.py` | The actual deobfuscation engine (10 detection + transform functions) |
+| `backend/manage_users.py` | CLI tool: list/create/delete/password |
+| `backend/models_config.json` | Name → path map for local HuggingFace models |
+| `frontend/src/App.js` | Single-file React app (all components) |
+| `frontend/src/App.css` | Global styles, `.deotter-btn` class |
 
 ---
 
-### Provider priority
+## Authentication Flow
 
-| Azure vars set | Anthropic var set | Provider used |
-|:-:|:-:|---|
-| ✅ | ✅ | **Azure AI Foundry** |
-| ✅ | ❌ | **Azure AI Foundry** |
-| ❌ | ✅ | **Anthropic / Claude** |
-| ❌ | ❌ | Error — configure one |
+1. React shows `LoginPage` (sign-in/sign-up toggle) before everything else.
+2. Sign-in: `POST /auth/login` → Flask verifies password (pbkdf2:sha256 + pepper), returns JWT.
+3. Sign-up: `POST /auth/register` → creates user with `status="pending"`, returns 201 (no JWT).
+4. JWT payload: `{ sub: username, role: "admin"|"user", exp: now+8h }`.
+5. JWT signed with `DEOTTER_SECRET` env var (default: hardcoded fallback — insecure for prod).
+6. Token stored in `localStorage.deotter_token`. Sent as `Authorization: Bearer <token>` on every request.
+7. `@require_auth` decorator in `auth.py` decodes the token and sets `request.current_user`.
+8. On 401, `authFetch()` in React automatically calls `handleLogout()` (removes token, shows login).
+9. Admin approves pending users via `/admin/users/<username>/approve` (sets `status="active"`).
 
----
+### Password security
 
-### Required Python package
-
-```bash
-pip install openai
-```
-
-The `openai` Python package is used to call the Azure AI Foundry endpoint (Azure exposes an OpenAI-compatible API). It is included in the standard `pip install` command in the README.
-
----
-
-### Why use Azure AI Foundry instead of Anthropic directly?
-
-| Concern | Azure AI Foundry | Anthropic direct |
-|---------|-----------------|-----------------|
-| Data residency | Stays in your Azure tenant/region | Sent to Anthropic's servers |
-| Billing | Through Azure subscription / EA | Direct Anthropic account |
-| SSO / access control | Azure AD / Entra ID | API key per user |
-| Compliance (GDPR, etc.) | Azure compliance portfolio | Anthropic's policies |
-| Model choice | GPT-4o, GPT-4, and more | Claude models only |
-
-For company deployments, Azure AI Foundry is usually preferred because data never leaves the corporate Azure environment.
+- Hashed with `werkzeug.generate_password_hash(password + pepper, method="pbkdf2:sha256")`.
+- Pepper stored in the `settings` table (key: `"pepper"`, default: `"D30tt3rk3y"`).
+- Pepper can be changed via Settings UI (admin only) — **invalidates all existing passwords**.
+- `scrypt` is not used because it requires Python 3.10+ and the venv is 3.9.
 
 ---
 
-## How the Anthropic API Key Works
+## Database Schema
 
-### What is an API key?
+```sql
+CREATE TABLE users (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    username    TEXT UNIQUE NOT NULL,
+    email       TEXT NOT NULL DEFAULT '',
+    password    TEXT NOT NULL,
+    role        TEXT NOT NULL DEFAULT 'user',   -- 'admin' | 'user'
+    status      TEXT NOT NULL DEFAULT 'active', -- 'active' | 'pending' | 'disabled'
+    submissions INTEGER NOT NULL DEFAULT 0
+);
 
-An API key is a secret credential that identifies **you** to Anthropic's servers.
-When DeOtter sends a JavaScript snippet to Claude for deobfuscation, it includes your
-API key in the request so Anthropic knows who is making the call and can charge your
-account for the usage.
+CREATE TABLE settings (
+    key   TEXT PRIMARY KEY,
+    value TEXT NOT NULL DEFAULT ''
+);
+```
 
-Think of it like a password: it grants access to a paid service under your name.
+Migrations run at startup in `init_db()` using `ALTER TABLE ... ADD COLUMN` in a try/except (safe to re-run).
+
+### Settings keys used
+
+| Key | Value |
+|-----|-------|
+| `pepper` | Password pepper string |
+| `ai_provider` | `"anthropic"` \| `"azure"` \| `"openai"` |
+| `anthropic_key` | Anthropic API key |
+| `azure_endpoint` | Azure AI Foundry endpoint URL |
+| `azure_key` | Azure AI Foundry API key |
+| `azure_deployment` | Deployment name in Foundry |
+| `openai_key` | OpenAI API key |
+| `openai_model` | OpenAI model name (default: `gpt-4o`) |
+| `logo_override` | Filename of custom logo in `frontend/public/` |
 
 ---
 
-### Is the key mine, or can others use their own?
+## AI Provider System
 
-**The key is yours and yours alone.**
+### How `_call_ai(prompt)` works
 
-- It is tied to your Anthropic account and your billing.
-- Every request made with it is charged to you.
-- If you share the key, whoever has it can make requests at your expense.
+Located in `app.py`. Priority chain:
 
-If you want other people to use DeOtter with AI, there are two options:
-
-| Option | How it works |
-|--------|--------------|
-| **Each user sets their own key** | They sign up at console.anthropic.com, get their own key, and set `ANTHROPIC_API_KEY` in their own environment. Zero cost to you. |
-| **You host a backend** | You keep your key on a server you control. Users hit your server, which calls Claude on their behalf. You pay the bill and can add rate limits or authentication. |
-
-For personal/local use, just set your own key. For a shared deployment, never expose the
-key to the browser or frontend — keep it server-side only (which is already the case in
-this project: the key lives in the Flask backend, not in the React frontend).
-
----
-
-### How to get your API key
-
-1. Go to [https://console.anthropic.com](https://console.anthropic.com)
-2. Sign up or log in.
-3. Navigate to **API Keys** in the left sidebar.
-4. Click **Create Key**, give it a name (e.g. `deotter-local`), and copy it.
-
-The key looks like: `sk-ant-api03-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx`
-
----
-
-### How to set the key so DeOtter can use it
-
-**Option A – Environment variable (recommended for local use):**
-
-```bash
-# macOS / Linux — run this before starting Flask
-export ANTHROPIC_API_KEY=sk-ant-api03-xxxxxxxx...
-
-# Windows (Command Prompt)
-set ANTHROPIC_API_KEY=sk-ant-api03-xxxxxxxx...
-
-# Windows (PowerShell)
-$env:ANTHROPIC_API_KEY="sk-ant-api03-xxxxxxxx..."
-```
-
-Then start the Flask backend normally:
-
-```bash
-cd backend
-python app.py
-```
-
-**Option B – `.env` file (more convenient):**
-
-Create a file at `backend/.env` with this content:
+1. Read provider + credentials from `settings` DB table (set via Settings UI).
+2. Fall back to environment variables if DB value is empty.
+3. Auto-detect provider if not explicitly set (azure > anthropic > openai).
 
 ```
-ANTHROPIC_API_KEY=sk-ant-api03-xxxxxxxx...
+DB settings  →  env vars  →  auto-detect
 ```
 
-Then install `python-dotenv`:
+### Azure AI Foundry integration
 
-```bash
-pip install python-dotenv
-```
-
-And add these two lines at the very top of `backend/app.py` (before everything else):
+Uses the standard `openai` Python SDK with `base_url` (not `AzureOpenAI`):
 
 ```python
-from dotenv import load_dotenv
-load_dotenv()
+from openai import OpenAI
+client = OpenAI(base_url=azure_endpoint, api_key=azure_key)
+response = client.responses.create(model=azure_deploy, input=prompt)
+return response.output_text, "azure"
 ```
 
-Flask will now read the key automatically every time it starts.
+This matches what Azure AI Foundry shows in its "Call this model" instructions. Fields required: **Endpoint**, **Deployment Name**, **API Key** (no API version needed).
 
----
-
-### Why you must NEVER commit the key to git
-
-If you push your API key to GitHub (even in a private repo), automated bots scan public
-repositories 24/7 and will find it within minutes. Someone else will then use it at your
-expense — or Anthropic will detect the leak and revoke it.
-
-The `.env` file is already listed in `.gitignore` in this project, so git will ignore it.
-**Never hardcode the key directly in `app.py` or any source file.**
-
----
-
-### Pricing
-
-Anthropic charges per token (roughly per word). Deobfuscating a short JS snippet costs
-fractions of a cent. You can monitor usage and set spending limits in the
-[Anthropic console](https://console.anthropic.com).
-
----
-
----
-
-## How Training Pairs Storage Works (localStorage)
-
-### What is localStorage?
-
-`localStorage` is a small key-value database built into every web browser. It has nothing
-to do with your server or your project files — the data lives on the **user's own machine**,
-inside their browser profile, tied to the domain of the website they are visiting.
-
-Key properties:
-- Survives page refreshes and browser restarts (no expiry).
-- Completely invisible to the server unless your code explicitly reads it and sends it in a request.
-- Each browser on each device has its own independent localStorage — data does not sync.
-- Storage limit is typically ~5 MB per domain, more than enough for training pairs.
-
-### How DeOtter uses it
-
-DeOtter stores all training pairs under a single localStorage key: `"deotter_pairs"`.
-
-The data looks like this inside the browser:
-
-```
-Key:   deotter_pairs
-Value: [{"obfuscated":"var _0x1a2b=...","clean":"var config = ..."},...]
-```
-
-**Writing:** Whenever you click **Good — Save as Training Pair** or **Add Training Pair**
-in the Train tab, the updated list is serialised to JSON and written to `localStorage`.
-
-**Reading:** When the app first loads in the browser, it reads `localStorage.getItem("deotter_pairs")`
-and restores the list into memory. This is why your pairs survive a page refresh — they
-were never in RAM to begin with, they were on disk in the browser's storage.
-
-**Sending to Flask:** The pairs are **never transmitted to the backend automatically**.
-They only get sent when you tick the **"Use training pairs"** checkbox before clicking
-**Deobfuscate using DeOtter AI**. Even then, only the last 5 pairs are sent (the backend
-uses them as examples in the prompt — sending more would just waste tokens for no gain).
-
-### What this means in practice
-
-| Scenario | What happens to your pairs |
-|---|---|
-| You refresh the page | Pairs are safe — read back from localStorage on reload |
-| You open DeOtter in another browser | Pairs are NOT there — localStorage is per-browser |
-| You open DeOtter on another device | Pairs are NOT there — localStorage is per-machine |
-| You click AI deobfuscate, checkbox OFF | Pairs stay in browser, nothing sent to server |
-| You click AI deobfuscate, checkbox ON | Last 5 pairs sent to Flask for that request only |
-| Flask / backend restarts | Pairs unaffected — they live in the browser |
-
-### Backing up and sharing pairs
-
-Because localStorage is local to one browser, the only way to back up or move your pairs is
-the **Download Training Pairs** button in the Train tab. It generates a `training_pairs.json`
-file from whatever is currently stored. Keep this file safe — it is your dataset.
-
-If you ever want to restore pairs (e.g. on a new machine), you would need to import them
-back. DeOtter does not have an import button yet, but you can open the browser console
-(`F12 → Console`) and run:
-
-```javascript
-localStorage.setItem("deotter_pairs", JSON.stringify([ /* paste your pairs array here */ ]));
-location.reload();
-```
-
----
-
-### What happens when the button is clicked
-
-1. The React frontend sends the obfuscated JS to `POST /ai-deobfuscate` on the Flask backend.
-2. Flask reads `ANTHROPIC_API_KEY` from the environment.
-3. Flask calls the Anthropic API with a prompt asking Claude to deobfuscate the code.
-4. Claude returns clean, readable JavaScript.
-5. Flask forwards that code back to the frontend, which displays it in the output panel.
-
-The key never touches the browser. The browser only talks to your local Flask server
-(`http://127.0.0.1:5000`).
-
----
-
-## Users Management
-
-### Overview
-
-DeOtter has a built-in user system designed for company/team deployments. Features:
-
-- **Login page** with the DeOtter logo loads before the app.
-- Two roles: **admin** and **user** (same app access for now, foundation for future restrictions).
-- Authenticated sessions via **JWT tokens** (8-hour expiry, stored in localStorage).
-- All API endpoints are protected — unauthenticated requests return `401`.
-
----
-
-### Where the database lives
-
-The user database is a single SQLite file:
-
-```
-backend/users.db
-```
-
-It is created **automatically** the first time Flask starts, so you do not need to do anything special. It is listed in `.gitignore` and will never be committed to git — each deployment manages its own users.
-
----
-
-### Default admin account
-
-On first startup, if the database is empty, DeOtter creates a default administrator:
-
-| Username | Password |
-|----------|----------|
-| `admin`  | `admin`  |
-
-**Change this password immediately** in any real deployment (see CLI below).
-
----
-
-### Managing users — CLI tool
-
-All user management is done via `backend/manage_users.py`. Always run it from the `backend/` directory with the venv activated.
-
-```bash
-cd backend
-source venv/bin/activate      # macOS / Linux
-venv\Scripts\activate         # Windows
-```
-
-#### List all users
-
-```bash
-python manage_users.py list
-```
-
-Output example:
-```
-ID    Username             Role
------------------------------------
-1     admin                admin
-2     alice                user
-3     bob                  user
-```
-
-#### Create a user
-
-```bash
-python manage_users.py create <username> <password>
-python manage_users.py create alice secret123
-python manage_users.py create bob pass456 --role admin
-```
-
-Default role is `user`. Pass `--role admin` for administrators.
-
-#### Delete a user
-
-```bash
-python manage_users.py delete alice
-```
-
-You will be asked to confirm before deletion.
-
-#### Change a password
-
-```bash
-python manage_users.py password alice newpassword123
-```
-
----
-
-### How authentication works (technical)
-
-1. The React frontend shows a login form before anything else.
-2. On submit, it calls `POST /auth/login` with `{ username, password }`.
-3. Flask verifies credentials against the SQLite database (passwords are hashed with bcrypt via `werkzeug`).
-4. On success, Flask returns a **JWT token** signed with `DEOTTER_SECRET` (8-hour expiry).
-5. The token is stored in `localStorage` under `deotter_token`.
-6. Every subsequent API call includes `Authorization: Bearer <token>` in the request headers.
-7. The `@require_auth` decorator on each Flask route validates the token before processing.
-8. On logout (gear icon → Log out), the token is removed from localStorage and the login page reappears.
-
----
-
-### Setting the JWT secret key
-
-For security, set a strong secret before deploying:
-
-```bash
-export DEOTTER_SECRET=some-long-random-string-here
-```
-
-If not set, Flask falls back to `"deotter-change-me-in-production"` — fine for local use, insecure for shared servers.
-
----
-
-### Required Python packages
-
-```bash
-pip install PyJWT werkzeug
-```
-
-Both are already installed in the project venv.
-
----
-
-### Files involved
-
-| File | Purpose |
-|------|---------|
-| `backend/db.py` | SQLite setup, CRUD functions, password hashing |
-| `backend/auth.py` | JWT token generation, `@require_auth` decorator, `/auth/login` and `/auth/me` endpoints |
-| `backend/manage_users.py` | CLI tool for listing, creating, deleting, and changing passwords |
-| `backend/users.db` | The database file (auto-created, gitignored) |
-
----
-
-## Company Email Restriction and SSO
-
-### Option A — Restrict registration to a company email domain
-
-The simplest approach for a company deployment: reject any sign-up that does not use your corporate email domain. This is a one-line check in `backend/auth.py` inside the `/auth/register` endpoint:
+### Anthropic integration
 
 ```python
-ALLOWED_DOMAIN = os.environ.get("ALLOWED_EMAIL_DOMAIN", "")  # e.g. "acme.com"
+import anthropic
+client = anthropic.Anthropic(api_key=anthropic_key)
+message = client.messages.create(
+    model="claude-sonnet-4-6",
+    max_tokens=4096,
+    messages=[{"role": "user", "content": prompt}],
+)
+return message.content[0].text, "anthropic"
+```
 
-# Inside /auth/register, after the basic email format check:
+### OpenAI integration
+
+```python
+from openai import OpenAI
+client = OpenAI(api_key=openai_key)
+response = client.chat.completions.create(
+    model=openai_model, messages=[{"role": "user", "content": prompt}], max_tokens=4096
+)
+return response.choices[0].message.content, "openai"
+```
+
+---
+
+## Local Model System
+
+### Flow
+
+1. `GET /available-models` returns keys from `models_config.json`.
+2. `POST /load-model` tries `pipeline("text-generation", ...)` then `pipeline("text2text-generation", ...)`.
+3. Loaded pipeline stored in global `MODEL_PIPELINE`, name in `LOADED_MODEL_NAME`.
+4. `POST /local-deobfuscate` builds a prompt and calls `MODEL_PIPELINE(prompt, max_new_tokens=1024)`.
+5. `GET /local-model-status` returns `{ loaded, model, transformers_available }` for the UI.
+
+### Requirements
+
+```bash
+pip install torch transformers
+```
+
+Only generative models work. Encoder-only models (CodeBERT) fail to load with a clear error message.
+
+### models_config.json format
+
+```json
+{
+  "ModelName": "/absolute/path/to/model/directory"
+}
+```
+
+Model must be already downloaded locally. Use `huggingface-cli download <model-id> --local-dir /path`.
+
+---
+
+## Usage Tracking (Submissions)
+
+Every call to `/deobfuscate`, `/ai-deobfuscate`, `/generate-report`, and `/local-deobfuscate` increments `users.submissions` for the requesting user via `db.increment_submissions(username)`.
+
+`GET /leaderboard` returns the top 3 users by submissions. Shown at the bottom of the main page as a medal podium (🥇🥈🥉).
+
+Admin panel shows the submission count per user.
+
+---
+
+## Frontend Architecture
+
+### Single-file React app (`App.js`)
+
+All components are in one file. Components:
+
+| Component | Role |
+|-----------|------|
+| `LoginPage` | Sign-in / sign-up toggle, JWT handling |
+| `DeobfuscatePage` | Main deobfuscation tab (rule-based, report, AI) |
+| `LabPage` | Lab tab: local model inference + training pairs |
+| `SettingsModal` | AI provider config, logo upload, pepper (admin-only write) |
+| `AdminPanel` | User list with approve/role/delete + submissions count |
+| `GearMenu` | Dropdown: Settings, Admin Panel, Log out |
+| `NotificationsPanel` | Bell icon (admin only), polls `/notifications` every 60s |
+| `InstructionsModal` | Paper icon, shows full setup guide inline |
+| `WelcomeBanner` | Toast shown on every login, GitHub link |
+| `App` | Root: auth state, theme, leaderboard, tab routing |
+
+### Theming
+
+`darkMode` boolean controls a `theme` object passed as prop. CSS custom properties `--btn-bg`, `--btn-text`, `--btn-border` are set inline on the root div and consumed by `.deotter-btn` in App.css.
+
+```css
+.deotter-btn {
+  border-radius: 20px;
+  background-color: var(--btn-bg);
+  color: var(--btn-text);
+  border: 1px solid var(--btn-border);
+}
+.deotter-btn:hover:not(:disabled) { filter: brightness(0.82); }
+```
+
+### Auth state
+
+Stored in `localStorage`:
+- `deotter_token` — JWT string
+- `deotter_user` — `{ username, role }` JSON
+
+### Training pairs
+
+Stored in `localStorage.deotter_pairs` as a JSON array. Never sent to server unless "Use training pairs" checkbox is ticked. Only last 5 sent in AI prompts (to limit token usage).
+
+### Logo system
+
+- Light mode: `999fbba3-83ed-4298-ba83-0747b9bfd1cc-2.png`
+- Dark mode: `deotterlogo_whitecontour.png`
+- Admin can override with any PNG/JPG uploaded via Settings, stored as `logo_override` in the settings DB.
+- "DeOtter" text rendered below logo in React (not baked into PNG).
+
+---
+
+## API Endpoints Reference
+
+| Method | Path | Auth | Description |
+|--------|------|------|-------------|
+| POST | `/auth/login` | ❌ | Returns JWT on valid credentials |
+| POST | `/auth/register` | ❌ | Creates pending user |
+| GET | `/auth/me` | ✅ | Returns current user info |
+| POST | `/deobfuscate` | ✅ | Rule-based deobfuscation |
+| POST | `/generate-report` | ✅ | Obfuscation technique report |
+| POST | `/ai-deobfuscate` | ✅ | AI deobfuscation via cloud provider |
+| POST | `/local-deobfuscate` | ✅ | AI deobfuscation via local model |
+| GET | `/local-model-status` | ✅ | Status of loaded local model |
+| GET | `/available-models` | ✅ | List of configured local models |
+| POST | `/load-model` | ✅ | Load a local model into memory |
+| GET | `/leaderboard` | ✅ | Top 3 users by submissions |
+| GET | `/notifications` | ✅ (admin) | Pending user approvals |
+| GET | `/admin/users` | ✅ (admin) | All users with submissions |
+| POST | `/admin/users/<u>/approve` | ✅ (admin) | Approve pending user |
+| POST | `/admin/users/<u>/role` | ✅ (admin) | Change user role |
+| DELETE | `/admin/users/<u>` | ✅ (admin) | Delete user |
+| GET | `/settings/ai` | ✅ | AI provider config (keys masked) |
+| POST | `/settings/ai` | ✅ (admin) | Save AI provider config |
+| GET | `/settings/pepper` | ✅ (admin) | Get current pepper |
+| POST | `/settings/pepper` | ✅ (admin) | Save new pepper |
+| GET | `/settings/logo-files` | ✅ | List available logo files |
+| POST | `/settings/upload-logo` | ✅ (admin) | Upload new logo |
+| POST | `/settings/clear-logo` | ✅ (admin) | Reset to default logo |
+
+---
+
+## Deployment Notes
+
+### macOS port conflict
+
+Port 5000 is used by macOS AirPlay Receiver (ControlCenter process). Flask runs on **5001** to avoid the conflict. Disable AirPlay Receiver in System Settings → General → AirDrop & Handoff if you want to use 5000.
+
+### Running in production
+
+- Set `DEOTTER_SECRET` to a strong random string and never change it (changing it invalidates all active sessions).
+- Disable Flask debug mode: change `debug=True` to `debug=False` in `app.py`.
+- Use a proper WSGI server (gunicorn, uWSGI) instead of Flask's dev server.
+- Put nginx in front of both Flask and the React build.
+- Build the React app: `cd frontend && npm run build` — serves as static files.
+
+---
+
+## Company Email / SSO (Future Work)
+
+### Option A — Domain restriction (easiest, 5 min)
+
+In `auth.py`, inside `/auth/register`, add:
+
+```python
+ALLOWED_DOMAIN = os.environ.get("ALLOWED_EMAIL_DOMAIN", "")
 if ALLOWED_DOMAIN and not email.endswith(f"@{ALLOWED_DOMAIN}"):
-    return jsonify({"error": f"Only @{ALLOWED_DOMAIN} email addresses are accepted"}), 403
+    return jsonify({"error": f"Only @{ALLOWED_DOMAIN} addresses are accepted"}), 403
 ```
 
-Set the domain in your environment:
 ```bash
 export ALLOWED_EMAIL_DOMAIN=acme.com
 ```
 
-This blocks self-registration from any address outside the domain. Admins can still create accounts for any user via the CLI (the CLI bypasses the email check).
+### Option B — Email verification
+
+1. Create user with `status="pending"`.
+2. Generate `secrets.token_urlsafe(32)`, store in DB, email verification link.
+3. On click, set `status="active"`.
+4. Currently the admin-approval system already does step 1 and 4 — extend with email instead.
+
+### Option C — SSO (SAML 2.0 / OIDC)
+
+SAML: `pip install python3-saml` — routes: `/auth/saml/login`, `/auth/saml/acs`, `/auth/saml/metadata`.  
+OIDC: `pip install authlib requests` — redirect to provider, exchange code for ID token, create local user.  
+Both require registration with IT team and IdP configuration.
 
 ---
 
-### Option B — Email verification before activation
+## Known Issues / Limitations
 
-A domain restriction alone does not guarantee the person owns the email. For higher assurance, add an email verification step:
-
-1. On sign-up, create the user with `active = 0` (add an `active` column to the DB).
-2. Generate a random token (e.g. `secrets.token_urlsafe(32)`), store it in the DB alongside the user, and email a link like `https://yourserver/auth/verify?token=...` using Python's `smtplib` or a service like SendGrid.
-3. When the link is clicked, set `active = 1` and delete the token.
-4. The `/auth/login` endpoint checks `active = 1` before issuing a JWT — inactive accounts cannot log in.
-
-This flow is standard but adds complexity. For most internal company deployments, a domain restriction (Option A) is sufficient since everyone already has a corporate email account.
-
----
-
-### Option C — Single Sign-On (SSO)
-
-SSO lets users log in with their existing company identity (Active Directory, Google Workspace, Okta, etc.) instead of a separate DeOtter password. Users click "Sign in with [Company]" and are redirected to their identity provider (IdP). No DeOtter password is ever created or stored.
-
-There are two main SSO protocols:
-
-#### SAML 2.0 — enterprise standard (Active Directory, ADFS, Okta, Azure AD)
-
-How it works:
-1. User clicks "Sign in with [Company]" in the DeOtter login page.
-2. Flask redirects them to the company's IdP (e.g. Okta, Azure AD).
-3. The IdP authenticates the user (company password, MFA, etc.).
-4. The IdP sends a signed XML assertion back to Flask via the browser.
-5. Flask validates the signature, extracts the username/email, and issues a DeOtter JWT.
-
-Python library: [`python3-saml`](https://github.com/SAML-Toolkits/python3-saml)
-
-```bash
-pip install python3-saml
-```
-
-Key Flask routes to add:
-- `GET /auth/saml/login` — redirects to the IdP
-- `POST /auth/saml/acs` — receives and validates the SAML assertion, returns JWT
-- `GET /auth/saml/metadata` — exposes your service provider metadata (needed by the IdP admin)
-
-The IdP admin needs your metadata XML to configure the trust relationship.
-
----
-
-#### OAuth2 / OpenID Connect (OIDC) — Google Workspace, Azure AD, Okta, GitHub
-
-More modern, REST-based alternative to SAML. Works with any provider that supports OAuth2.
-
-How it works:
-1. User clicks "Sign in with Google/Microsoft/Okta".
-2. Flask redirects to the provider's authorization endpoint.
-3. User authenticates on the provider's site.
-4. Provider redirects back with an authorization code.
-5. Flask exchanges the code for an ID token containing the user's email and name.
-6. Flask validates the token, creates a local user record if needed, and issues a DeOtter JWT.
-
-Python library: [`authlib`](https://authlib.org/) (works with Flask, supports all major providers)
-
-```bash
-pip install authlib requests
-```
-
-Each provider gives you a **Client ID** and **Client Secret** when you register the app in their developer console. Store these as environment variables:
-
-```bash
-export OAUTH_CLIENT_ID=...
-export OAUTH_CLIENT_SECRET=...
-```
-
----
-
-#### Which to choose?
-
-| Scenario | Recommendation |
-|----------|----------------|
-| Microsoft Active Directory / ADFS on-premise | SAML 2.0 |
-| Azure AD (cloud) | Either — OIDC is simpler |
-| Google Workspace | OIDC |
-| Okta | Either — Okta supports both |
-| No IT department, small team | Domain restriction (Option A) |
-
-For most modern company deployments, **OIDC with Azure AD or Google Workspace** is the easiest path. For large enterprises with on-premise AD, **SAML 2.0** is typically required by the IT team.
-
-SSO implementation is a multi-day project and requires coordination with your IT/identity team to register the application and configure the trust. The domain restriction (Option A) can be added in 5 minutes and covers most internal deployment needs.
+- Local models must be downloaded manually — no in-app download.
+- Training pairs are browser-local (localStorage) — no server-side sync.
+- No rate limiting on AI endpoints — any authenticated user can call them freely.
+- `users.db` is a single file — not suitable for multi-server deployments without a shared mount.

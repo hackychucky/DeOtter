@@ -7,6 +7,16 @@ import "./App.css";
 
 const API = `http://${window.location.hostname}:5001`;
 
+const COMPATIBLE_MODELS = [
+  "Mistral 7B / Mixtral",
+  "LLaMA 3 (Meta)",
+  "CodeLlama",
+  "DeepSeek-Coder",
+  "Phi-3 (Microsoft)",
+  "Qwen2.5-Coder",
+  "StarCoder2",
+];
+
 async function authFetch(token, url, options = {}, onUnauthorized) {
   const res = await fetch(url, {
     ...options,
@@ -152,9 +162,11 @@ function LoginPage({ onLogin, theme, darkMode, logoOverride }) {
 }
 
 // ------------------------------
-// Training Page
+// Lab Page (Training + Local Model)
 // ------------------------------
-function TrainingPage({ obfuscated, setObfuscated, clean, setClean, pairs, setPairs }) {
+function LabPage({ obfuscated, setObfuscated, clean, setClean, pairs, setPairs,
+                   availableModels, selectedModel, setSelectedModel,
+                   token, theme, handleLogout }) {
   const highlight = (code) => Prism.highlight(code, Prism.languages.javascript, "javascript");
 
   const handleAddPair = () => {
@@ -189,14 +201,125 @@ function TrainingPage({ obfuscated, setObfuscated, clean, setClean, pairs, setPa
     e.target.value = "";
   };
 
+  const [modelStatus, setModelStatus] = useState({ loaded: false, model: null, transformers_available: null });
+  const [loadingModel, setLoadingModel] = useState(false);
+  const [loadMsg, setLoadMsg] = useState({ text: "", ok: true });
+  const [localCode, setLocalCode] = useState("");
+  const [localOutput, setLocalOutput] = useState("");
+  const [runningLocal, setRunningLocal] = useState(false);
+  const [modelPolicy, setModelPolicy] = useState({});
+
+  useEffect(() => {
+    authFetch(token, `${API}/local-model-status`, {}, handleLogout)
+      .then(r => r.json()).then(d => setModelStatus(d)).catch(() => {});
+    authFetch(token, `${API}/settings/model-policy`, {}, handleLogout)
+      .then(r => r.json()).then(d => setModelPolicy(d.policy || {})).catch(() => {});
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [token]);
+
+  const handleLoadModel = async () => {
+    if (!selectedModel) return;
+    setLoadingModel(true); setLoadMsg({ text: "", ok: true });
+    try {
+      const res = await authFetch(token, `${API}/load-model`, { method: "POST", body: JSON.stringify({ model_name: selectedModel }) }, handleLogout);
+      const data = await res.json();
+      setLoadMsg({ text: data.message || data.error, ok: res.ok });
+      if (res.ok) setModelStatus({ loaded: true, model: selectedModel, transformers_available: true });
+    } catch { setLoadMsg({ text: "Could not reach server.", ok: false }); }
+    setLoadingModel(false);
+  };
+
+  const handleLocalDeobfuscate = async () => {
+    setRunningLocal(true); setLocalOutput("");
+    try {
+      const res = await authFetch(token, `${API}/local-deobfuscate`, { method: "POST", body: JSON.stringify({ code: localCode }) }, handleLogout);
+      const data = await res.json();
+      setLocalOutput(res.ok ? data.deobfuscated : `Error: ${data.error}`);
+    } catch (e) { setLocalOutput(`Request failed: ${e.message}`); }
+    setRunningLocal(false);
+  };
+
+  const sectionTitle = { fontFamily: '"Fira Code", monospace', fontSize: "1rem", fontWeight: "bold", color: theme.text, margin: "0 0 0.8rem 0", textTransform: "uppercase", letterSpacing: "0.06em" };
+  const divider = { borderTop: `1px solid ${theme.selectBorder}`, margin: "2rem 0" };
+  const infoBox = { fontFamily: '"Fira Code", monospace', fontSize: "0.82rem", backgroundColor: theme.selectBg, border: `1px solid ${theme.selectBorder}`, borderRadius: "10px", padding: "0.8rem 1rem", marginBottom: "1rem", color: theme.subtext, textAlign: "left" };
+
   return (
     <div style={{ padding: "2rem" }}>
-      <h2 style={{ fontFamily: '"Fira Code", monospace', fontSize: "1.2rem" }}>Train the Model</h2>
+
+      {/* ── Local Model Section ── */}
+      <h3 style={sectionTitle}>Local Model Inference</h3>
+
+      <div style={infoBox}>
+        <strong style={{ color: "#f0ad4e" }}>⚠ Requires torch + transformers (~2 GB download)</strong><br />
+        Install before loading a model:<br />
+        <code style={{ color: theme.text }}>pip install torch transformers</code><br /><br />
+        <strong>Note:</strong> Only generative models work (e.g. CodeT5, StarCoder, Mistral). Encoder-only models like CodeBERT cannot generate text.
+        {modelStatus.transformers_available === false && (
+          <span style={{ color: "#dc3545", display: "block", marginTop: "0.4rem" }}>
+            torch/transformers not installed. Run the command above in the backend venv.
+          </span>
+        )}
+      </div>
+
+      <div style={infoBox}>
+        <strong style={{ color: theme.text }}>DeOtter works with the following local models:</strong>
+        <ul style={{ margin: "0.5rem 0 0 0", paddingLeft: "1.2rem" }}>
+          {COMPATIBLE_MODELS.map(m => {
+            const isAllowed = modelPolicy[m] === "allowed";
+            const badgeColor = isAllowed ? "#28a745" : "#dc3545";
+            const badge = isAllowed ? "✓ allowed by company policy" : "✗ not allowed by company policy";
+            return (
+              <li key={m} style={{ color: theme.subtext, marginBottom: "0.25rem" }}>
+                {m} <span style={{ fontSize: "0.75rem", color: badgeColor }}>{badge}</span>
+              </li>
+            );
+          })}
+        </ul>
+      </div>
+
+      <div style={{ display: "flex", alignItems: "center", gap: "10px", flexWrap: "wrap", marginBottom: "0.8rem" }}>
+        <select
+          value={selectedModel}
+          onChange={e => setSelectedModel(e.target.value)}
+          style={{ padding: "9px 16px", fontSize: "0.9rem", backgroundColor: theme.selectBg, color: theme.selectColor, border: `1px solid ${theme.selectBorder}`, borderRadius: "20px" }}
+        >
+          <option value="">— Select a model —</option>
+          {availableModels.map(m => <option key={m} value={m}>{m}</option>)}
+        </select>
+        <button className="deotter-btn" onClick={handleLoadModel} disabled={!selectedModel || loadingModel} style={{ margin: 0 }}>
+          {loadingModel ? "Loading…" : "Load Model"}
+        </button>
+        {modelStatus.loaded && (
+          <span style={{ fontFamily: '"Fira Code", monospace', fontSize: "0.8rem", color: "#28a745" }}>
+            ● {modelStatus.model} loaded
+          </span>
+        )}
+      </div>
+      {loadMsg.text && (
+        <p style={{ fontFamily: '"Fira Code", monospace', fontSize: "0.82rem", color: loadMsg.ok ? "#28a745" : "#dc3545", margin: "0 0 0.8rem" }}>{loadMsg.text}</p>
+      )}
+
+      <div style={editorContainerStyle}>
+        <Editor value={localCode} onValueChange={setLocalCode} highlight={highlight} padding={10} style={editorInnerStyle} placeholder="Paste JavaScript to deobfuscate with local model" />
+      </div>
+      <button className="deotter-btn" onClick={handleLocalDeobfuscate} disabled={!modelStatus.loaded || !localCode.trim() || runningLocal}>
+        {runningLocal ? "Running…" : "Deobfuscate with Local Model"}
+      </button>
+      {localOutput && (
+        <div style={editorContainerStyle}>
+          <div style={{ color: "#aaa", fontSize: "0.8rem", marginBottom: "6px" }}>Local Model Output</div>
+          <Editor value={localOutput} onValueChange={setLocalOutput} highlight={highlight} padding={10} style={editorInnerStyle} />
+        </div>
+      )}
+
+      <div style={divider} />
+
+      {/* ── Training Pairs Section ── */}
+      <h3 style={sectionTitle}>Training Pairs</h3>
 
       <div style={editorContainerStyle}>
         <Editor value={obfuscated} onValueChange={setObfuscated} highlight={highlight} padding={10} style={editorInnerStyle} placeholder="Insert obfuscated Javascript code" />
       </div>
-
       <div style={editorContainerStyle}>
         <Editor value={clean} onValueChange={setClean} highlight={highlight} padding={10} style={editorInnerStyle} placeholder="Insert clean Javascript code" />
       </div>
@@ -206,19 +329,19 @@ function TrainingPage({ obfuscated, setObfuscated, clean, setClean, pairs, setPa
       <button className="deotter-btn" onClick={handleDownload} disabled={pairs.length === 0}>Download Training Pairs</button>
       <button className="deotter-btn" onClick={() => document.getElementById("upload-pairs").click()}>Upload Training Pairs</button>
 
-      <h3 style={{ marginTop: "2rem", fontFamily: '"Fira Code", monospace', fontSize: "1.05rem" }}>Training Pairs</h3>
-      <ul style={{ textAlign: "left" }}>
-        {pairs.map((p, idx) => (
-          <li key={idx} style={{ marginBottom: "0.6rem" }}>
-            <strong>Obfuscated:</strong> {p.obfuscated.slice(0, 60)}... <br />
-            <strong>Clean:</strong> {p.clean.slice(0, 60)}...
-          </li>
-        ))}
-      </ul>
-
-      <div style={{ marginTop: "1rem" }}>
-        <button className="deotter-btn" onClick={() => setPairs([])}>Clear Pairs</button>
-      </div>
+      {pairs.length > 0 && (
+        <>
+          <ul style={{ textAlign: "left", marginTop: "1.2rem", fontFamily: '"Fira Code", monospace', fontSize: "0.82rem" }}>
+            {pairs.map((p, idx) => (
+              <li key={idx} style={{ marginBottom: "0.5rem", color: theme.subtext }}>
+                <strong style={{ color: theme.text }}>#{idx + 1}</strong> &nbsp;
+                {p.obfuscated.slice(0, 50)}…
+              </li>
+            ))}
+          </ul>
+          <button className="deotter-btn" onClick={() => setPairs([])}>Clear All Pairs</button>
+        </>
+      )}
     </div>
   );
 }
@@ -228,8 +351,7 @@ function TrainingPage({ obfuscated, setObfuscated, clean, setClean, pairs, setPa
 // ------------------------------
 function DeobfuscatePage({
   code, setCode, report, setReport,
-  availableModels, selectedModel, setSelectedModel,
-  handleDeobfuscate, handleGenerateReport, handleAIDeobfuscate, handleLoadModel,
+  handleDeobfuscate, handleGenerateReport, handleAIDeobfuscate,
   showFeedback, handleGood, handleBad,
   usePairs, setUsePairs, pairsCount, theme, darkMode, logoOverride,
 }) {
@@ -279,23 +401,6 @@ function DeobfuscatePage({
           <input type="checkbox" checked={usePairs} onChange={e => setUsePairs(e.target.checked)} style={{ marginRight: "6px" }} />
           Use training pairs {pairsCount > 0 ? `(${pairsCount})` : "(none)"}
         </label>
-      </div>
-
-      <div style={{ marginTop: "1rem" }}>
-        <select
-          value={selectedModel}
-          onChange={(e) => setSelectedModel(e.target.value)}
-          style={{
-            padding: "9px 16px", fontSize: "0.95rem",
-            margin: "0 6px",
-            backgroundColor: theme.selectBg, color: theme.selectColor,
-            border: `1px solid ${theme.selectBorder}`, borderRadius: "20px",
-          }}
-        >
-          <option value="">Select a model</option>
-          {availableModels.map((m) => <option key={m} value={m}>{m}</option>)}
-        </select>
-        <button className="deotter-btn" onClick={handleLoadModel}>Load Selected Model</button>
       </div>
 
       {report && (
@@ -554,6 +659,7 @@ function SettingsModal({ token, currentUser, theme, onClose, onUnauth, onLogoSav
                 {logoOverride && (
                   <button
                     className="deotter-btn"
+                    disabled={!isAdmin}
                     onClick={async () => {
                       await authFetch(token, `${API}/settings/clear-logo`, { method: "POST" }, onUnauth);
                       setLogoOverride("");
@@ -575,7 +681,7 @@ function SettingsModal({ token, currentUser, theme, onClose, onUnauth, onLogoSav
                 <button
                   className="deotter-btn"
                   onClick={() => fileInputRef.current && fileInputRef.current.click()}
-                  disabled={uploading}
+                  disabled={uploading || !isAdmin}
                   style={{ margin: "0 0 0.6rem 0", width: "100%" }}
                 >
                   {uploading ? "Uploading…" : "Upload new logo…"}
@@ -771,6 +877,8 @@ function AdminPanel({ token, theme, onClose, onUnauth }) {
   const [users, setUsers] = useState([]);
   const [loading, setLoading] = useState(true);
   const [actionMsg, setActionMsg] = useState("");
+  const [modelPolicy, setModelPolicy] = useState({});
+  const [policyMsg, setPolicyMsg] = useState("");
 
   const loadUsers = async () => {
     setLoading(true);
@@ -782,7 +890,35 @@ function AdminPanel({ token, theme, onClose, onUnauth }) {
     setLoading(false);
   };
 
-  useEffect(() => { loadUsers(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  const loadPolicy = async () => {
+    try {
+      const res = await authFetch(token, `${API}/settings/model-policy`, {}, onUnauth);
+      const data = await res.json();
+      if (res.ok) setModelPolicy(data.policy || {});
+    } catch {}
+  };
+
+  useEffect(() => { loadUsers(); loadPolicy(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const toggleModel = async (modelName) => {
+    const isAllowed = modelPolicy[modelName] === "allowed";
+    const newPolicy = { ...modelPolicy };
+    if (isAllowed) {
+      delete newPolicy[modelName];
+    } else {
+      newPolicy[modelName] = "allowed";
+    }
+    setModelPolicy(newPolicy);
+    setPolicyMsg("");
+    try {
+      const res = await authFetch(token, `${API}/settings/model-policy`, {
+        method: "POST",
+        body: JSON.stringify({ policy: newPolicy }),
+      }, onUnauth);
+      const data = await res.json();
+      setPolicyMsg(data.message || data.error || "Saved.");
+    } catch { setPolicyMsg("Save failed."); }
+  };
 
   const doAction = async (url, method = "POST", body = null) => {
     setActionMsg("");
@@ -809,9 +945,11 @@ function AdminPanel({ token, theme, onClose, onUnauth }) {
     >
       <div style={{ backgroundColor: theme.bg, border: `1px solid ${theme.selectBorder}`, borderRadius: "14px", padding: "1.8rem", width: "100%", maxWidth: "640px", fontFamily: '"Fira Code", monospace', color: theme.text, boxShadow: "0 8px 32px rgba(0,0,0,0.25)", maxHeight: "80vh", overflowY: "auto" }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "1.4rem" }}>
-          <h2 style={{ margin: 0, fontSize: "1.05rem" }}>Admin Panel — Users</h2>
+          <h2 style={{ margin: 0, fontSize: "1.05rem" }}>Admin Panel</h2>
           <button onClick={onClose} className="deotter-btn" style={{ padding: "4px 12px", margin: 0 }}>✕</button>
         </div>
+
+        <h3 style={{ margin: "0 0 0.8rem 0", fontSize: "0.85rem", color: theme.subtext, textTransform: "uppercase", letterSpacing: "0.06em" }}>Users</h3>
 
         {loading ? <p style={{ color: theme.subtext }}>Loading…</p> : (
           <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "0.82rem" }}>
@@ -820,6 +958,7 @@ function AdminPanel({ token, theme, onClose, onUnauth }) {
                 <th style={{ padding: "6px 8px" }}>Username</th>
                 <th style={{ padding: "6px 8px" }}>Role</th>
                 <th style={{ padding: "6px 8px" }}>Status</th>
+                <th style={{ padding: "6px 8px" }}>Submissions</th>
                 <th style={{ padding: "6px 8px" }}>Actions</th>
               </tr>
             </thead>
@@ -829,6 +968,7 @@ function AdminPanel({ token, theme, onClose, onUnauth }) {
                   <td style={{ padding: "8px 8px", color: theme.text }}>{u.username}</td>
                   <td style={{ padding: "8px 8px", color: theme.subtext }}>{u.role}</td>
                   <td style={{ padding: "8px 8px", color: u.status === "pending" ? "#f0ad4e" : "#28a745" }}>{u.status}</td>
+                  <td style={{ padding: "8px 8px", color: theme.subtext, textAlign: "center" }}>{u.submissions || 0}</td>
                   <td style={{ padding: "6px 8px" }}>
                     <div style={{ display: "flex", gap: "6px", flexWrap: "wrap" }}>
                       {u.status === "pending" && (
@@ -855,6 +995,43 @@ function AdminPanel({ token, theme, onClose, onUnauth }) {
 
         {actionMsg && (
           <p style={{ color: theme.subtext, fontSize: "0.82rem", marginTop: "1rem" }}>{actionMsg}</p>
+        )}
+
+        <div style={{ borderTop: `1px solid ${theme.selectBorder}`, margin: "1.6rem 0 1rem" }} />
+        <h3 style={{ margin: "0 0 0.8rem 0", fontSize: "0.85rem", color: theme.subtext, textTransform: "uppercase", letterSpacing: "0.06em" }}>Model Policy</h3>
+        <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "0.82rem" }}>
+          <thead>
+            <tr style={{ borderBottom: `1px solid ${theme.selectBorder}`, color: theme.subtext, textAlign: "left" }}>
+              <th style={{ padding: "6px 8px" }}>Model</th>
+              <th style={{ padding: "6px 8px" }}>Status</th>
+              <th style={{ padding: "6px 8px" }}>Action</th>
+            </tr>
+          </thead>
+          <tbody>
+            {COMPATIBLE_MODELS.map(m => {
+              const isAllowed = modelPolicy[m] === "allowed";
+              return (
+                <tr key={m} style={{ borderBottom: `1px solid ${theme.selectBorder}` }}>
+                  <td style={{ padding: "8px 8px", color: theme.text }}>{m}</td>
+                  <td style={{ padding: "8px 8px", color: isAllowed ? "#28a745" : "#dc3545" }}>
+                    {isAllowed ? "Allowed" : "Not Allowed"}
+                  </td>
+                  <td style={{ padding: "6px 8px" }}>
+                    <button
+                      className="deotter-btn"
+                      style={{ margin: 0, padding: "3px 10px", fontSize: "0.75rem", color: isAllowed ? "#dc3545" : "#28a745", borderColor: isAllowed ? "#dc3545" : "#28a745" }}
+                      onClick={() => toggleModel(m)}
+                    >
+                      {isAllowed ? "Revoke" : "Allow"}
+                    </button>
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+        {policyMsg && (
+          <p style={{ color: theme.subtext, fontSize: "0.82rem", marginTop: "0.8rem" }}>{policyMsg}</p>
         )}
       </div>
     </div>
@@ -948,6 +1125,82 @@ function GearMenu({ username, role, onLogout, onSettings, onAdminPanel, theme })
 }
 
 // ------------------------------
+// Instructions Modal
+// ------------------------------
+function InstructionsModal({ theme, onClose }) {
+  const code = (s) => (
+    <code style={{ backgroundColor: theme.selectBg, border: `1px solid ${theme.selectBorder}`, borderRadius: "4px", padding: "1px 6px", fontFamily: '"Fira Code", monospace', fontSize: "0.82rem", color: theme.text }}>{s}</code>
+  );
+  const h = (s) => <div style={{ fontWeight: "bold", fontSize: "0.85rem", color: theme.text, margin: "1.2rem 0 0.4rem", textTransform: "uppercase", letterSpacing: "0.06em" }}>{s}</div>;
+  const p = (s) => <div style={{ color: theme.subtext, fontSize: "0.82rem", lineHeight: 1.6, marginBottom: "0.4rem" }}>{s}</div>;
+
+  return (
+    <div onClick={e => { if (e.target === e.currentTarget) onClose(); }}
+      style={{ position: "fixed", inset: 0, zIndex: 4000, backgroundColor: "rgba(0,0,0,0.6)", display: "flex", alignItems: "center", justifyContent: "center", padding: "1rem" }}>
+      <div style={{ backgroundColor: theme.bg, border: `1px solid ${theme.selectBorder}`, borderRadius: "14px", padding: "1.8rem", width: "100%", maxWidth: "580px", maxHeight: "85vh", overflowY: "auto", fontFamily: '"Fira Code", monospace', color: theme.text, boxShadow: "0 8px 32px rgba(0,0,0,0.3)" }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "1.4rem" }}>
+          <h2 style={{ margin: 0, fontSize: "1.05rem" }}>Setup & Usage Guide</h2>
+          <button onClick={onClose} className="deotter-btn" style={{ padding: "4px 12px", margin: 0 }}>✕</button>
+        </div>
+
+        {h("1 — Clone & install")}
+        {p("Clone the repo, create a Python venv, install dependencies:")}
+        <pre style={{ backgroundColor: theme.selectBg, borderRadius: "8px", padding: "0.8rem", fontSize: "0.78rem", color: theme.text, overflowX: "auto", margin: "0.4rem 0" }}>{`git clone https://github.com/hackychucky/deotter.git
+cd DeOtter/backend
+python3 -m venv venv && source venv/bin/activate
+pip install flask flask-cors anthropic openai PyJWT werkzeug`}</pre>
+
+        {h("2 — Start the app")}
+        {p("From the frontend folder — starts both Flask (port 5001) and React (port 3000):")}
+        <pre style={{ backgroundColor: theme.selectBg, borderRadius: "8px", padding: "0.8rem", fontSize: "0.78rem", color: theme.text, overflowX: "auto", margin: "0.4rem 0" }}>{`cd frontend
+npm install
+npm start`}</pre>
+
+        {h("3 — AI Provider (required for AI features)")}
+        {p("Configure via Settings (gear icon) in the app after logging in. Supported providers:")}
+
+        <div style={{ marginTop: "0.4rem", marginBottom: "0.8rem" }}>
+          <div style={{ color: theme.text, fontSize: "0.82rem", marginBottom: "0.3rem" }}><strong>Anthropic / Claude</strong> — get key at console.anthropic.com</div>
+          <pre style={{ backgroundColor: theme.selectBg, borderRadius: "8px", padding: "0.6rem", fontSize: "0.78rem", color: theme.text, margin: "0.2rem 0" }}>{`export ANTHROPIC_API_KEY=sk-...`}</pre>
+
+          <div style={{ color: theme.text, fontSize: "0.82rem", margin: "0.6rem 0 0.3rem" }}><strong>Azure AI Foundry</strong> — use endpoint + deployment from ai.azure.com</div>
+          <pre style={{ backgroundColor: theme.selectBg, borderRadius: "8px", padding: "0.6rem", fontSize: "0.78rem", color: theme.text, margin: "0.2rem 0" }}>{`export AZURE_FOUNDRY_ENDPOINT=https://...
+export AZURE_FOUNDRY_DEPLOYMENT=my-gpt4o
+export AZURE_FOUNDRY_API_KEY=your-key`}</pre>
+
+          <div style={{ color: theme.text, fontSize: "0.82rem", margin: "0.6rem 0 0.3rem" }}><strong>OpenAI</strong> — get key at platform.openai.com</div>
+          <pre style={{ backgroundColor: theme.selectBg, borderRadius: "8px", padding: "0.6rem", fontSize: "0.78rem", color: theme.text, margin: "0.2rem 0" }}>{`export OPENAI_API_KEY=sk-...`}</pre>
+        </div>
+
+        {h("4 — Local Model (optional, heavy)")}
+        {p("Install torch + transformers (≈2 GB). Only generative models work (CodeT5, StarCoder, Mistral — NOT CodeBERT).")}
+        <pre style={{ backgroundColor: theme.selectBg, borderRadius: "8px", padding: "0.6rem", fontSize: "0.78rem", color: theme.text, margin: "0.2rem 0 0.8rem" }}>{`pip install torch transformers`}</pre>
+        {p("Add model paths to backend/models_config.json, then use the Lab tab to load and run inference.")}
+
+        {h("5 — Users & Admin")}
+        {p("Default admin credentials: admin / pa$$w0rd — change immediately.")}
+        <pre style={{ backgroundColor: theme.selectBg, borderRadius: "8px", padding: "0.6rem", fontSize: "0.78rem", color: theme.text, margin: "0.2rem 0" }}>{`python3 manage_users.py list
+python3 manage_users.py create alice secret --role admin
+python3 manage_users.py password admin newpass
+python3 manage_users.py delete alice`}</pre>
+        {p("New sign-ups are pending by default — approve them in the Admin Panel (bell icon).")}
+
+        {h("6 — JWT Secret")}
+        {p("Set a permanent secret to avoid token expiry on Flask restarts:")}
+        <pre style={{ backgroundColor: theme.selectBg, borderRadius: "8px", padding: "0.6rem", fontSize: "0.78rem", color: theme.text, margin: "0.2rem 0" }}>{`export DEOTTER_SECRET=some-long-random-string`}</pre>
+
+        <div style={{ marginTop: "1.4rem", borderTop: `1px solid ${theme.selectBorder}`, paddingTop: "1rem" }}>
+          <a href="https://github.com/hackychucky/deotter" target="_blank" rel="noreferrer"
+            style={{ color: "#4f8ef7", fontSize: "0.82rem", textDecoration: "none" }}>
+            Full docs: github.com/hackychucky/deotter →
+          </a>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ------------------------------
 // Welcome Banner (first login)
 // ------------------------------
 function WelcomeBanner({ username, theme, onDismiss }) {
@@ -1008,8 +1261,10 @@ function App() {
   const [usePairs, setUsePairs] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
   const [showAdminPanel, setShowAdminPanel] = useState(false);
+  const [showInstructions, setShowInstructions] = useState(false);
   const [logoOverride, setLogoOverride] = useState("");
   const [showWelcome, setShowWelcome] = useState(false);
+  const [leaderboard, setLeaderboard] = useState([]);
   const [darkMode, setDarkMode] = useState(() => {
     try { return localStorage.getItem("deotter_dark") === "true"; }
     catch { return false; }
@@ -1054,6 +1309,10 @@ function App() {
     authFetch(token, `${API}/settings/ai`, {}, handleLogout)
       .then(r => r.json())
       .then(d => { if (d.logo_override !== undefined) setLogoOverride(d.logo_override); })
+      .catch(() => {});
+    authFetch(token, `${API}/leaderboard`, {}, handleLogout)
+      .then(r => r.json())
+      .then(d => { if (d.top) setLeaderboard(d.top); })
       .catch(() => {});
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [token]);
@@ -1103,15 +1362,6 @@ function App() {
   };
   const handleBad = () => { setReport(""); setShowFeedback(false); };
 
-  const handleLoadModel = async () => {
-    if (!selectedModel) return;
-    try {
-      const res = await authFetch(token, `${API}/load-model`, { method: "POST", body: JSON.stringify({ model_name: selectedModel }) }, handleLogout);
-      const data = await res.json();
-      alert(res.ok ? data.message : `Error: ${data.error}`);
-    } catch (err) { alert(`Request failed: ${err.message}`); }
-  };
-
   // CSS custom properties for the .deotter-btn class
   const cssVars = {
     "--btn-bg":     btnBg,
@@ -1138,6 +1388,20 @@ function App() {
         {currentUser.role === "admin" && (
           <NotificationsPanel token={token} theme={theme} onUnauth={handleLogout} />
         )}
+        <button
+          onClick={() => setShowInstructions(true)}
+          title="Setup & Usage Guide"
+          className="deotter-btn"
+          style={{ width: "40px", height: "40px", borderRadius: "50%", padding: 0, margin: 0 }}
+        >
+          <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+            <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+            <polyline points="14 2 14 8 20 8"/>
+            <line x1="16" y1="13" x2="8" y2="13"/>
+            <line x1="16" y1="17" x2="8" y2="17"/>
+            <polyline points="10 9 9 9 8 9"/>
+          </svg>
+        </button>
         <GearMenu username={currentUser.username} role={currentUser.role} onLogout={handleLogout} onSettings={() => setShowSettings(true)} onAdminPanel={() => setShowAdminPanel(true)} theme={theme} />
         <button
           onClick={() => setDarkMode(d => !d)}
@@ -1164,7 +1428,7 @@ function App() {
       {/* Tabs */}
       <div style={{ marginBottom: "1.5rem" }}>
         <button className="deotter-btn" style={{ opacity: tab === "deobfuscate" ? 1 : 0.55 }} onClick={() => setTab("deobfuscate")}>Deobfuscate</button>
-        <button className="deotter-btn" style={{ opacity: tab === "train" ? 1 : 0.55 }} onClick={() => setTab("train")}>Train</button>
+        <button className="deotter-btn" style={{ opacity: tab === "lab" ? 1 : 0.55 }} onClick={() => setTab("lab")}>Lab</button>
       </div>
 
       {showSettings && (
@@ -1185,32 +1449,51 @@ function App() {
           onUnauth={handleLogout}
         />
       )}
+      {showInstructions && <InstructionsModal theme={theme} onClose={() => setShowInstructions(false)} />}
       {showWelcome && (
-        <WelcomeBanner
-          username={currentUser.username}
-          theme={theme}
-          onDismiss={() => setShowWelcome(false)}
-        />
+        <WelcomeBanner username={currentUser.username} theme={theme} onDismiss={() => setShowWelcome(false)} />
       )}
 
       {tab === "deobfuscate" ? (
         <DeobfuscatePage
           code={code} setCode={setCode} report={report} setReport={setReport}
-          availableModels={availableModels} selectedModel={selectedModel} setSelectedModel={setSelectedModel}
           handleDeobfuscate={handleDeobfuscate} handleGenerateReport={handleGenerateReport}
-          handleAIDeobfuscate={handleAIDeobfuscate} handleLoadModel={handleLoadModel}
+          handleAIDeobfuscate={handleAIDeobfuscate}
           showFeedback={showFeedback} handleGood={handleGood} handleBad={handleBad}
           usePairs={usePairs} setUsePairs={setUsePairs} pairsCount={trainPairs.length}
-          theme={theme}
-          darkMode={darkMode}
-          logoOverride={logoOverride}
+          theme={theme} darkMode={darkMode} logoOverride={logoOverride}
         />
       ) : (
-        <TrainingPage
+        <LabPage
           obfuscated={trainObfuscated} setObfuscated={setTrainObfuscated}
           clean={trainClean} setClean={setTrainClean}
           pairs={trainPairs} setPairs={setTrainPairs}
+          availableModels={availableModels}
+          selectedModel={selectedModel} setSelectedModel={setSelectedModel}
+          token={token} theme={theme} handleLogout={handleLogout}
         />
+      )}
+
+      {/* Leaderboard */}
+      {leaderboard.length > 0 && (
+        <div style={{ marginTop: "3rem", paddingTop: "1.5rem", borderTop: `1px solid ${theme.selectBorder}`, fontFamily: '"Fira Code", monospace' }}>
+          <div style={{ fontSize: "0.78rem", color: theme.subtext, textTransform: "uppercase", letterSpacing: "0.1em", marginBottom: "1rem" }}>
+            Top Deobfuscators
+          </div>
+          <div style={{ display: "flex", justifyContent: "center", gap: "1.5rem", flexWrap: "wrap" }}>
+            {leaderboard.map((u, i) => {
+              const medals = ["🥇", "🥈", "🥉"];
+              const colors = ["#f0ad4e", "#aaaaaa", "#cd7f32"];
+              return (
+                <div key={u.username} style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: "4px" }}>
+                  <div style={{ fontSize: i === 0 ? "2rem" : "1.6rem" }}>{medals[i]}</div>
+                  <div style={{ fontSize: "0.85rem", fontWeight: "bold", color: colors[i] }}>{u.username}</div>
+                  <div style={{ fontSize: "0.75rem", color: theme.subtext }}>{u.submissions} submission{u.submissions !== 1 ? "s" : ""}</div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
       )}
     </div>
   );

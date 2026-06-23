@@ -2,7 +2,7 @@ from flask import Flask, request, jsonify
 from flask_cors import CORS
 
 try:
-    from transformers import AutoTokenizer, AutoModel
+    from transformers import AutoTokenizer, AutoModelForCausalLM, AutoModelForSeq2SeqLM, pipeline
     import torch
     TRANSFORMERS_AVAILABLE = True
 except ImportError:
@@ -124,7 +124,9 @@ def gen_report_endpoint():
 
     #return jsonify({'report': f"Received code with length: {len(code)}"})
 
-    report = gen_report_from_code(code)  # fetching the report
+    report = gen_report_from_code(code)
+    from db import increment_submissions
+    increment_submissions(request.current_user["sub"])
     return jsonify({'report': report})
 
 
@@ -138,6 +140,8 @@ def deobfuscate_code():
     code = data.get('code', '')
     detected_patterns = detect_patterns(code)
     deobfuscated_code = deobfuscate_from_string(code)
+    from db import increment_submissions
+    increment_submissions(request.current_user["sub"])
     return jsonify({"deobfuscated": deobfuscated_code, "patterns": detected_patterns})
 
 
@@ -164,9 +168,9 @@ def deobfuscate_from_string(code_str):
 # AI SECTION STARTS HERE
 # ------------------------------
 
-# Global VARS for the model
-MODEL = None
-TOKENIZER = None
+# Global VARS for local model
+MODEL_PIPELINE = None
+LOADED_MODEL_NAME = None
 
 # ------------------------------
 # ENDPOINT FOR LOADING MODEL
@@ -174,25 +178,79 @@ TOKENIZER = None
 @app.route("/load-model", methods=["POST"])
 @require_auth
 def load_model():
-    global MODEL, TOKENIZER
+    global MODEL_PIPELINE, LOADED_MODEL_NAME
 
     if not TRANSFORMERS_AVAILABLE:
-        return jsonify({"error": "transformers/torch not installed. Local models unavailable."}), 500
+        return jsonify({"error": "transformers and torch are not installed. Run: pip install torch transformers"}), 500
 
     data = request.get_json()
     model_name = data.get("model_name", "")
 
     if model_name not in MODEL_PATHS:
-        return jsonify({"error": f"Modelo '{model_name}' no encontrado en configuración."}), 400
+        return jsonify({"error": f"Model '{model_name}' not found in configuration."}), 400
 
     model_path = MODEL_PATHS[model_name]
 
+    for task in ("text-generation", "text2text-generation"):
+        try:
+            MODEL_PIPELINE = pipeline(task, model=model_path, local_files_only=True,
+                                      device="cpu", trust_remote_code=True)
+            LOADED_MODEL_NAME = model_name
+            return jsonify({"message": f"Model '{model_name}' loaded ({task}).", "task": task})
+        except Exception:
+            continue
+
+    MODEL_PIPELINE = None
+    LOADED_MODEL_NAME = None
+    return jsonify({"error": f"Could not load '{model_name}' for text generation. The model may be encoder-only (e.g. CodeBERT) and does not support generation. Use a causal LM or seq2seq model (e.g. CodeT5, StarCoder, Mistral)."}), 500
+
+
+@app.route("/local-deobfuscate", methods=["POST"])
+@require_auth
+def local_deobfuscate():
+    global MODEL_PIPELINE, LOADED_MODEL_NAME
+
+    if not TRANSFORMERS_AVAILABLE:
+        return jsonify({"error": "transformers and torch are not installed. Run: pip install torch transformers"}), 500
+    if MODEL_PIPELINE is None:
+        return jsonify({"error": "No model loaded. Select a model and click Load first."}), 400
+
+    data = request.get_json() or {}
+    code = data.get("code", "").strip()
+    if not code:
+        return jsonify({"error": "No code provided"}), 400
+
+    prompt = (
+        "Deobfuscate the following JavaScript code. "
+        "Return only the clean, readable code without any explanation:\n\n"
+        f"{code}\n\nClean code:"
+    )
+
     try:
-        TOKENIZER = AutoTokenizer.from_pretrained(model_path, local_files_only=True)
-        MODEL = AutoModel.from_pretrained(model_path, local_files_only=True)
-        return jsonify({"message": f"Modelo '{model_name}' cargado correctamente."})
+        result = MODEL_PIPELINE(prompt, max_new_tokens=1024, do_sample=False)
+        if isinstance(result, list) and result:
+            generated = result[0].get("generated_text", "") or result[0].get("translation_text", "")
+            if generated.startswith(prompt):
+                generated = generated[len(prompt):]
+        else:
+            generated = str(result)
+
+        from db import increment_submissions
+        increment_submissions(request.current_user["sub"])
+
+        return jsonify({"deobfuscated": generated.strip(), "model": LOADED_MODEL_NAME})
     except Exception as e:
-        return jsonify({"error": f"No se pudo cargar el modelo: {str(e)}"}), 500
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/local-model-status", methods=["GET"])
+@require_auth
+def local_model_status():
+    return jsonify({
+        "loaded": MODEL_PIPELINE is not None,
+        "model": LOADED_MODEL_NAME,
+        "transformers_available": TRANSFORMERS_AVAILABLE,
+    })
 
 
 
@@ -294,6 +352,8 @@ def ai_deobfuscate():
         prompt = build_prompt(code, selected, detected_patterns)
 
         deobfuscated, provider = _call_ai(prompt)
+        from db import increment_submissions
+        increment_submissions(request.current_user["sub"])
         return jsonify({
             "deobfuscated": deobfuscated,
             "patterns": detected_patterns,
@@ -512,6 +572,52 @@ def clear_logo():
     from db import set_setting
     set_setting("logo_override", "")
     return jsonify({"message": "Logo cleared."})
+
+
+# ------------------------------
+# MODEL POLICY
+# ------------------------------
+
+COMPATIBLE_MODELS = [
+    "Mistral 7B / Mixtral",
+    "LLaMA 3 (Meta)",
+    "CodeLlama",
+    "DeepSeek-Coder",
+    "Phi-3 (Microsoft)",
+    "Qwen2.5-Coder",
+    "StarCoder2",
+]
+
+@app.route("/settings/model-policy", methods=["GET"])
+@require_auth
+def get_model_policy():
+    from db import get_setting
+    raw = get_setting("model_policy")
+    policy = json.loads(raw) if raw else {}
+    return jsonify({"policy": policy, "models": COMPATIBLE_MODELS})
+
+
+@app.route("/settings/model-policy", methods=["POST"])
+@require_auth
+def save_model_policy():
+    if request.current_user.get("role") != "admin":
+        return jsonify({"error": "Admin access required"}), 403
+    from db import set_setting
+    data = request.get_json() or {}
+    policy = data.get("policy", {})
+    set_setting("model_policy", json.dumps(policy))
+    return jsonify({"message": "Model policy saved."})
+
+
+# ------------------------------
+# LEADERBOARD
+# ------------------------------
+
+@app.route("/leaderboard", methods=["GET"])
+@require_auth
+def leaderboard():
+    from db import get_top_users
+    return jsonify({"top": get_top_users(3)})
 
 
 if __name__ == '__main__':

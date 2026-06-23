@@ -64,8 +64,9 @@ def init_db():
 
     # Migrations: add columns that may not exist in older databases
     for col, defn in [
-        ("email",  "TEXT NOT NULL DEFAULT ''"),
-        ("status", "TEXT NOT NULL DEFAULT 'active'"),
+        ("email",       "TEXT NOT NULL DEFAULT ''"),
+        ("status",      "TEXT NOT NULL DEFAULT 'active'"),
+        ("submissions", "INTEGER NOT NULL DEFAULT 0"),
     ]:
         try:
             conn.execute(f"ALTER TABLE users ADD COLUMN {col} {defn}")
@@ -107,7 +108,24 @@ def get_user(username):
 def list_users():
     conn = get_conn()
     rows = conn.execute(
-        "SELECT id, username, email, role, status FROM users ORDER BY status DESC, id"
+        "SELECT id, username, email, role, status, submissions FROM users ORDER BY status DESC, id"
+    ).fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+
+def increment_submissions(username):
+    conn = get_conn()
+    conn.execute("UPDATE users SET submissions = submissions + 1 WHERE username = ?", (username,))
+    conn.commit()
+    conn.close()
+
+
+def get_top_users(limit=3):
+    conn = get_conn()
+    rows = conn.execute(
+        "SELECT username, submissions FROM users WHERE status = 'active' AND submissions > 0 ORDER BY submissions DESC LIMIT ?",
+        (limit,)
     ).fetchall()
     conn.close()
     return [dict(r) for r in rows]
