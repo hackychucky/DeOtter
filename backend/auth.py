@@ -3,7 +3,7 @@ import jwt
 import datetime
 from functools import wraps
 from flask import Blueprint, request, jsonify
-from db import verify_password, get_user, create_user
+from db import verify_password, get_user, create_user, list_users
 
 auth_bp = Blueprint("auth", __name__, url_prefix="/auth")
 
@@ -54,6 +54,10 @@ def login():
     user = verify_password(username, password)
     if not user:
         return jsonify({"error": "Invalid credentials"}), 401
+    if user.get("status") == "pending":
+        return jsonify({"error": "Your account is pending admin approval."}), 403
+    if user.get("status") == "disabled":
+        return jsonify({"error": "Your account has been disabled."}), 403
     token = make_token(user)
     return jsonify({"token": token, "username": user["username"], "role": user["role"]})
 
@@ -62,21 +66,18 @@ def login():
 def register():
     data = request.get_json() or {}
     username = data.get("username", "").strip()
-    email = data.get("email", "").strip().lower()
     password = data.get("password", "")
 
-    if not username or not email or not password:
-        return jsonify({"error": "Username, email, and password are required"}), 400
-    if "@" not in email or "." not in email.split("@")[-1]:
-        return jsonify({"error": "Invalid email address"}), 400
+    if not username or not password:
+        return jsonify({"error": "Username and password are required"}), 400
+    if len(username) < 3:
+        return jsonify({"error": "Username must be at least 3 characters"}), 400
 
-    ok, err = create_user(username, password, role="user", email=email)
+    ok, err = create_user(username, password, role="user", email="", status="pending")
     if not ok:
         return jsonify({"error": err}), 409
 
-    user = get_user(username)
-    token = make_token(user)
-    return jsonify({"token": token, "username": user["username"], "role": user["role"]}), 201
+    return jsonify({"message": "Account created. Waiting for admin approval."}), 201
 
 
 @auth_bp.route("/me", methods=["GET"])

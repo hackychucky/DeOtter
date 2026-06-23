@@ -222,14 +222,15 @@ def _call_ai(prompt):
     """
     from db import get_setting
 
-    provider = get_setting("ai_provider")  # "azure" | "anthropic" | ""
+    provider = get_setting("ai_provider")  # "azure" | "anthropic" | "openai" | ""
 
     # Credentials — DB overrides env vars
-    azure_endpoint = get_setting("azure_endpoint") or os.environ.get("AZURE_OPENAI_ENDPOINT", "")
-    azure_key      = get_setting("azure_key")      or os.environ.get("AZURE_OPENAI_API_KEY", "")
-    azure_deploy   = get_setting("azure_deployment") or os.environ.get("AZURE_OPENAI_DEPLOYMENT", "gpt-4o")
-    azure_version  = get_setting("azure_version")  or os.environ.get("AZURE_OPENAI_API_VERSION", "2024-12-01-preview")
+    azure_endpoint = get_setting("azure_endpoint") or os.environ.get("AZURE_FOUNDRY_ENDPOINT", "")
+    azure_key      = get_setting("azure_key")      or os.environ.get("AZURE_FOUNDRY_API_KEY", "")
+    azure_deploy   = get_setting("azure_deployment") or os.environ.get("AZURE_FOUNDRY_DEPLOYMENT", "")
     anthropic_key  = get_setting("anthropic_key")  or os.environ.get("ANTHROPIC_API_KEY", "")
+    openai_key     = get_setting("openai_key")     or os.environ.get("OPENAI_API_KEY", "")
+    openai_model   = get_setting("openai_model")   or "gpt-4o"
 
     # Auto-detect provider when not explicitly set
     if not provider:
@@ -237,18 +238,16 @@ def _call_ai(prompt):
             provider = "azure"
         elif anthropic_key:
             provider = "anthropic"
+        elif openai_key:
+            provider = "openai"
 
     if provider == "azure":
-        if not azure_endpoint or not azure_key:
-            raise RuntimeError("Azure AI Foundry is selected but the endpoint or API key is not configured. Open Settings to complete the setup.")
-        from openai import AzureOpenAI
-        client = AzureOpenAI(azure_endpoint=azure_endpoint, api_key=azure_key, api_version=azure_version)
-        response = client.chat.completions.create(
-            model=azure_deploy,
-            messages=[{"role": "user", "content": prompt}],
-            max_tokens=4096,
-        )
-        return response.choices[0].message.content, "azure"
+        if not azure_endpoint or not azure_key or not azure_deploy:
+            raise RuntimeError("Azure AI Foundry is selected but endpoint, deployment name, or API key is missing. Open Settings to complete the setup.")
+        from openai import OpenAI
+        client = OpenAI(base_url=azure_endpoint, api_key=azure_key)
+        response = client.responses.create(model=azure_deploy, input=prompt)
+        return response.output_text, "azure"
 
     if provider == "anthropic":
         if not anthropic_key:
@@ -261,6 +260,18 @@ def _call_ai(prompt):
             messages=[{"role": "user", "content": prompt}],
         )
         return message.content[0].text, "anthropic"
+
+    if provider == "openai":
+        if not openai_key:
+            raise RuntimeError("OpenAI is selected but the API key is not configured. Open Settings to complete the setup.")
+        from openai import OpenAI
+        client = OpenAI(api_key=openai_key)
+        response = client.chat.completions.create(
+            model=openai_model,
+            messages=[{"role": "user", "content": prompt}],
+            max_tokens=4096,
+        )
+        return response.choices[0].message.content, "openai"
 
     raise RuntimeError(
         "No AI provider configured. An admin must open Settings and enter the API credentials."
@@ -308,6 +319,7 @@ def get_ai_settings():
     azure_key     = get_setting("azure_key")
     def hint(k):
         return f"...{k[-4:]}" if len(k) > 4 else ("set" if k else "")
+    openai_key = get_setting("openai_key")
     return jsonify({
         "provider":           get_setting("ai_provider") or "anthropic",
         "anthropic_key_set":  bool(anthropic_key),
@@ -315,8 +327,10 @@ def get_ai_settings():
         "azure_endpoint":     get_setting("azure_endpoint"),
         "azure_key_set":      bool(azure_key),
         "azure_key_hint":     hint(azure_key),
-        "azure_deployment":   get_setting("azure_deployment") or "gpt-4o",
-        "azure_version":      get_setting("azure_version") or "2024-12-01-preview",
+        "azure_deployment":   get_setting("azure_deployment") or "",
+        "openai_key_set":     bool(openai_key),
+        "openai_key_hint":    hint(openai_key),
+        "openai_model":       get_setting("openai_model") or "gpt-4o",
         "logo_override":      get_setting("logo_override") or "",
     })
 
@@ -328,14 +342,16 @@ def save_ai_settings():
         return jsonify({"error": "Admin access required"}), 403
     from db import set_setting
     data = request.get_json() or {}
-    set_setting("ai_provider",    data.get("provider", "").strip())
-    set_setting("azure_endpoint", data.get("azure_endpoint", "").strip())
+    set_setting("ai_provider",      data.get("provider", "").strip())
+    set_setting("azure_endpoint",   data.get("azure_endpoint", "").strip())
     set_setting("azure_deployment", data.get("azure_deployment", "").strip())
-    set_setting("azure_version",  data.get("azure_version", "").strip())
     if data.get("anthropic_key", "").strip():
         set_setting("anthropic_key", data["anthropic_key"].strip())
     if data.get("azure_key", "").strip():
         set_setting("azure_key", data["azure_key"].strip())
+    if data.get("openai_key", "").strip():
+        set_setting("openai_key", data["openai_key"].strip())
+    set_setting("openai_model", data.get("openai_model", "").strip() or "gpt-4o")
     if "logo_override" in data:
         set_setting("logo_override", data["logo_override"].strip())
     return jsonify({"message": "Settings saved."})
@@ -386,6 +402,118 @@ def available_models():
         return jsonify({"error": str(e)}), 500
 
 
+# ------------------------------
+# NOTIFICATIONS ENDPOINT
+# ------------------------------
+
+@app.route("/notifications", methods=["GET"])
+@require_auth
+def notifications():
+    if request.current_user.get("role") != "admin":
+        return jsonify({"pending_count": 0, "pending_users": []}), 200
+    from db import list_users
+    pending = [u for u in list_users() if u.get("status") == "pending"]
+    return jsonify({"pending_count": len(pending), "pending_users": pending})
+
+
+# ------------------------------
+# ADMIN USER MANAGEMENT
+# ------------------------------
+
+@app.route("/admin/users", methods=["GET"])
+@require_auth
+def admin_list_users():
+    if request.current_user.get("role") != "admin":
+        return jsonify({"error": "Admin access required"}), 403
+    from db import list_users
+    return jsonify({"users": list_users()})
+
+
+@app.route("/admin/users/<username>/approve", methods=["POST"])
+@require_auth
+def admin_approve_user(username):
+    if request.current_user.get("role") != "admin":
+        return jsonify({"error": "Admin access required"}), 403
+    from db import update_user_field
+    ok = update_user_field(username, "status", "active")
+    if not ok:
+        return jsonify({"error": "User not found"}), 404
+    return jsonify({"message": f"User '{username}' approved."})
+
+
+@app.route("/admin/users/<username>/role", methods=["POST"])
+@require_auth
+def admin_change_role(username):
+    if request.current_user.get("role") != "admin":
+        return jsonify({"error": "Admin access required"}), 403
+    if username == request.current_user.get("sub"):
+        return jsonify({"error": "You cannot change your own role"}), 400
+    data = request.get_json() or {}
+    new_role = data.get("role", "").strip()
+    if new_role not in ("admin", "user"):
+        return jsonify({"error": "Role must be 'admin' or 'user'"}), 400
+    from db import update_user_field
+    ok = update_user_field(username, "role", new_role)
+    if not ok:
+        return jsonify({"error": "User not found"}), 404
+    return jsonify({"message": "Role updated."})
+
+
+@app.route("/admin/users/<username>", methods=["DELETE"])
+@require_auth
+def admin_delete_user(username):
+    if request.current_user.get("role") != "admin":
+        return jsonify({"error": "Admin access required"}), 403
+    if username == request.current_user.get("sub"):
+        return jsonify({"error": "You cannot delete your own account"}), 400
+    from db import delete_user
+    ok = delete_user(username)
+    if not ok:
+        return jsonify({"error": "User not found"}), 404
+    return jsonify({"message": f"User '{username}' deleted."})
+
+
+# ------------------------------
+# PEPPER SETTINGS
+# ------------------------------
+
+@app.route("/settings/pepper", methods=["GET"])
+@require_auth
+def get_pepper():
+    if request.current_user.get("role") != "admin":
+        return jsonify({"error": "Admin access required"}), 403
+    from db import get_setting
+    return jsonify({"pepper": get_setting("pepper") or "D30tt3rk3y"})
+
+
+@app.route("/settings/pepper", methods=["POST"])
+@require_auth
+def save_pepper():
+    if request.current_user.get("role") != "admin":
+        return jsonify({"error": "Admin access required"}), 403
+    from db import set_setting
+    data = request.get_json() or {}
+    new_pepper = data.get("pepper", "").strip()
+    if not new_pepper:
+        return jsonify({"error": "Pepper cannot be empty"}), 400
+    set_setting("pepper", new_pepper)
+    return jsonify({"message": "Pepper saved. All existing passwords are now invalid — users must reset them."})
+
+
+# ------------------------------
+# CLEAR LOGO
+# ------------------------------
+
+@app.route("/settings/clear-logo", methods=["POST"])
+@require_auth
+def clear_logo():
+    if request.current_user.get("role") != "admin":
+        return jsonify({"error": "Admin access required"}), 403
+    from db import set_setting
+    set_setting("logo_override", "")
+    return jsonify({"message": "Logo cleared."})
+
+
 if __name__ == '__main__':
-    app.run(debug=True)
+    app.run(host='0.0.0.0', port=5001, debug=True)
 

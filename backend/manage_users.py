@@ -17,10 +17,10 @@ def cmd_list():
     if not users:
         print("No users found.")
         return
-    print(f"{'ID':<5} {'Username':<20} {'Email':<32} {'Role'}")
-    print("-" * 62)
+    print(f"{'ID':<5} {'Username':<20} {'Role':<10} {'Status'}")
+    print("-" * 50)
     for u in users:
-        print(f"{u['id']:<5} {u['username']:<20} {u.get('email', ''):<32} {u['role']}")
+        print(f"{u['id']:<5} {u['username']:<20} {u['role']:<10} {u.get('status', 'active')}")
 
 
 def cmd_create(args):
@@ -41,7 +41,7 @@ def cmd_create(args):
     if role not in ("admin", "user"):
         print("Role must be 'admin' or 'user'.")
         sys.exit(1)
-    ok, err = create_user(username, password, role, email=email)
+    ok, err = create_user(username, password, role, email=email, status="active")
     if ok:
         print(f"User '{username}' created with role '{role}'.")
     else:

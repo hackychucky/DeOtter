@@ -5,7 +5,7 @@ import "prismjs/components/prism-javascript";
 import "prismjs/themes/prism-tomorrow.css";
 import "./App.css";
 
-const API = "http://127.0.0.1:5000";
+const API = `http://${window.location.hostname}:5001`;
 
 async function authFetch(token, url, options = {}, onUnauthorized) {
   const res = await fetch(url, {
@@ -28,15 +28,15 @@ async function authFetch(token, url, options = {}, onUnauthorized) {
 function LoginPage({ onLogin, theme, darkMode, logoOverride }) {
   const [mode, setMode] = useState("signin");
   const [username, setUsername] = useState("");
-  const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
-  const [password2, setPassword2] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
   const [error, setError] = useState("");
+  const [successMsg, setSuccessMsg] = useState("");
   const [loading, setLoading] = useState(false);
 
   const switchMode = (m) => {
     setMode(m);
-    setUsername(""); setEmail(""); setPassword(""); setPassword2(""); setError("");
+    setUsername(""); setPassword(""); setConfirmPassword(""); setError(""); setSuccessMsg("");
   };
 
   const handleSignIn = async (e) => {
@@ -57,17 +57,22 @@ function LoginPage({ onLogin, theme, darkMode, logoOverride }) {
 
   const handleSignUp = async (e) => {
     e.preventDefault();
-    if (password !== password2) { setError("Passwords do not match"); return; }
+    if (password !== confirmPassword) { setError("Passwords do not match"); return; }
     setError(""); setLoading(true);
     try {
       const res = await fetch(`${API}/auth/register`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ username, email, password }),
+        body: JSON.stringify({ username, password }),
       });
       const data = await res.json();
-      if (res.ok) onLogin(data.token, data.username, data.role);
-      else setError(data.error || "Registration failed");
+      if (res.status === 201) {
+        setMode("signin");
+        setUsername(""); setPassword(""); setConfirmPassword(""); setError("");
+        setSuccessMsg("You've been registered successfully. Once an administrator approves your account, you'll be able to sign in to DeOtter.");
+      } else {
+        setError(data.error || "Registration failed");
+      }
     } catch { setError("Could not reach server. Is Flask running?"); }
     finally { setLoading(false); }
   };
@@ -126,15 +131,15 @@ function LoginPage({ onLogin, theme, darkMode, logoOverride }) {
         style={{ display: "flex", flexDirection: "column", gap: "0.7rem", width: "100%", maxWidth: "320px" }}
       >
         <input style={inputStyle} type="text" placeholder="Username" value={username} onChange={e => setUsername(e.target.value)} autoFocus autoComplete="username" />
-        {mode === "signup" && (
-          <input style={inputStyle} type="email" placeholder="Email" value={email} onChange={e => setEmail(e.target.value)} autoComplete="email" />
-        )}
         <input style={inputStyle} type="password" placeholder="Password" value={password} onChange={e => setPassword(e.target.value)} autoComplete={mode === "signin" ? "current-password" : "new-password"} />
         {mode === "signup" && (
-          <input style={inputStyle} type="password" placeholder="Confirm password" value={password2} onChange={e => setPassword2(e.target.value)} autoComplete="new-password" />
+          <input style={inputStyle} type="password" placeholder="Confirm password" value={confirmPassword} onChange={e => setConfirmPassword(e.target.value)} autoComplete="new-password" />
         )}
         {error && (
           <p style={{ color: "#dc3545", margin: 0, fontSize: "0.82rem", fontFamily: '"Fira Code", monospace' }}>{error}</p>
+        )}
+        {successMsg && (
+          <p style={{ color: "#28a745", margin: 0, fontSize: "0.82rem", fontFamily: '"Fira Code", monospace' }}>{successMsg}</p>
         )}
         <button type="submit" disabled={loading} className="deotter-btn" style={{ margin: 0, width: "100%" }}>
           {loading
@@ -337,19 +342,31 @@ function SettingsModal({ token, currentUser, theme, onClose, onUnauth, onLogoSav
   const [uploading, setUploading] = useState(false);
   const [uploadMsg, setUploadMsg] = useState({ text: "", ok: true });
   const fileInputRef = useRef(null);
+  const [openaiKey, setOpenaiKey] = useState("");
+  const [openaiModel, setOpenaiModel] = useState("gpt-4o");
+  const [openaiHint, setOpenaiHint] = useState("");
+  const [pepper, setPepper] = useState("");
+  const [pepperVisible, setPepperVisible] = useState(false);
+  const [pepperSaving, setPepperSaving] = useState(false);
+  const [pepperMsg, setPepperMsg] = useState({ text: "", ok: true });
 
   useEffect(() => {
-    Promise.all([
+    const fetches = [
       authFetch(token, `${API}/settings/ai`, {}, onUnauth).then(r => r.json()),
       authFetch(token, `${API}/settings/logo-files`, {}, onUnauth).then(r => r.json()),
-    ]).then(([ai, lf]) => {
+      authFetch(token, `${API}/settings/pepper`, {}, onUnauth).then(r => r.ok ? r.json() : { pepper: "" }),
+    ];
+    Promise.all(fetches).then(([ai, lf, pp]) => {
       setProvider(ai.provider || "anthropic");
       setAzureEndpoint(ai.azure_endpoint || "");
       setAzureDeployment(ai.azure_deployment || "gpt-4o");
       setAzureVersion(ai.azure_version || "2024-12-01-preview");
       setHints({ anthropic: ai.anthropic_key_hint || "", azure: ai.azure_key_hint || "" });
+      setOpenaiHint(ai.openai_key_hint || "");
+      setOpenaiModel(ai.openai_model || "gpt-4o");
       setLogoOverride(ai.logo_override || "");
       setLogoFiles(lf.files || []);
+      setPepper(pp.pepper || "");
       setLoading(false);
     }).catch(() => setLoading(false));
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -357,9 +374,10 @@ function SettingsModal({ token, currentUser, theme, onClose, onUnauth, onLogoSav
 
   const handleSave = async () => {
     setSaving(true); setMsg({ text: "", ok: true });
-    const payload = { provider, azure_endpoint: azureEndpoint, azure_deployment: azureDeployment, azure_version: azureVersion, logo_override: logoOverride };
+    const payload = { provider, azure_endpoint: azureEndpoint, azure_deployment: azureDeployment, azure_version: azureVersion, openai_model: openaiModel, logo_override: logoOverride };
     if (anthropicKey.trim()) payload.anthropic_key = anthropicKey.trim();
     if (azureKey.trim()) payload.azure_key = azureKey.trim();
+    if (openaiKey.trim()) payload.openai_key = openaiKey.trim();
     try {
       const res = await authFetch(token, `${API}/settings/ai`, { method: "POST", body: JSON.stringify(payload) }, onUnauth);
       const data = await res.json();
@@ -367,6 +385,7 @@ function SettingsModal({ token, currentUser, theme, onClose, onUnauth, onLogoSav
         setMsg({ text: "Settings saved.", ok: true });
         if (anthropicKey.trim()) { setHints(h => ({ ...h, anthropic: "..." + anthropicKey.slice(-4) })); setAnthropicKey(""); }
         if (azureKey.trim()) { setHints(h => ({ ...h, azure: "..." + azureKey.slice(-4) })); setAzureKey(""); }
+        if (openaiKey.trim()) { setOpenaiHint("..." + openaiKey.slice(-4)); setOpenaiKey(""); }
         if (onLogoSaved) onLogoSaved(logoOverride);
       } else {
         setMsg({ text: data.error || "Save failed.", ok: false });
@@ -448,11 +467,15 @@ function SettingsModal({ token, currentUser, theme, onClose, onUnauth, onLogoSav
             <div style={{ display: "flex", marginBottom: "1.2rem", border: `1px solid ${theme.selectBorder}`, borderRadius: "24px", overflow: "hidden", opacity: isAdmin ? 1 : 0.4, pointerEvents: isAdmin ? "auto" : "none" }}>
               <button onClick={() => setProvider("anthropic")} className="deotter-btn"
                 style={{ borderRadius: "24px 0 0 24px", margin: 0, flex: 1, border: "none", opacity: provider === "anthropic" ? 1 : 0.5 }}>
-                Anthropic Claude
+                Claude
               </button>
               <button onClick={() => setProvider("azure")} className="deotter-btn"
-                style={{ borderRadius: "0 24px 24px 0", margin: 0, flex: 1, border: "none", borderLeft: `1px solid ${theme.selectBorder}`, opacity: provider === "azure" ? 1 : 0.5 }}>
-                Azure AI Foundry
+                style={{ borderRadius: 0, margin: 0, flex: 1, border: "none", borderLeft: `1px solid ${theme.selectBorder}`, opacity: provider === "azure" ? 1 : 0.5 }}>
+                Azure
+              </button>
+              <button onClick={() => setProvider("openai")} className="deotter-btn"
+                style={{ borderRadius: "0 24px 24px 0", margin: 0, flex: 1, border: "none", borderLeft: `1px solid ${theme.selectBorder}`, opacity: provider === "openai" ? 1 : 0.5 }}>
+                OpenAI
               </button>
             </div>
 
@@ -464,7 +487,7 @@ function SettingsModal({ token, currentUser, theme, onClose, onUnauth, onLogoSav
                     API Key{hints.anthropic && <span style={{ marginLeft: 6, opacity: 0.7 }}>({hints.anthropic})</span>}
                   </label>
                   <input style={fieldStyle()} type="password"
-                    placeholder={hints.anthropic ? "Leave blank to keep existing key" : "sk-ant-..."}
+                    placeholder={hints.anthropic ? "Leave blank to keep existing key" : "sk-..."}
                     value={anthropicKey} onChange={e => setAnthropicKey(e.target.value)} disabled={!isAdmin} />
                 </>
               )}
@@ -472,23 +495,34 @@ function SettingsModal({ token, currentUser, theme, onClose, onUnauth, onLogoSav
               {provider === "azure" && (
                 <>
                   <label style={labelStyle}>Endpoint</label>
-                  <input style={fieldStyle()} type="text" placeholder="https://YOUR-RESOURCE.openai.azure.com/"
+                  <input style={fieldStyle()} type="text" placeholder="https://YOUR-RESOURCE.services.ai.azure.com/models"
                     value={azureEndpoint} onChange={e => setAzureEndpoint(e.target.value)} disabled={!isAdmin} />
+
+                  <label style={labelStyle}>Deployment Name</label>
+                  <input style={fieldStyle()} type="text" placeholder="my-gpt4o-deployment"
+                    value={azureDeployment} onChange={e => setAzureDeployment(e.target.value)} disabled={!isAdmin} />
 
                   <label style={labelStyle}>
                     API Key{hints.azure && <span style={{ marginLeft: 6, opacity: 0.7 }}>({hints.azure})</span>}
                   </label>
                   <input style={fieldStyle()} type="password"
-                    placeholder={hints.azure ? "Leave blank to keep existing key" : "Your Azure API key"}
+                    placeholder={hints.azure ? "Leave blank to keep existing key" : "Your Azure AI Foundry API key"}
                     value={azureKey} onChange={e => setAzureKey(e.target.value)} disabled={!isAdmin} />
+                </>
+              )}
 
-                  <label style={labelStyle}>Deployment Name</label>
+              {provider === "openai" && (
+                <>
+                  <label style={labelStyle}>
+                    API Key{openaiHint && <span style={{ marginLeft: 6, opacity: 0.7 }}>({openaiHint})</span>}
+                  </label>
+                  <input style={fieldStyle()} type="password"
+                    placeholder={openaiHint ? "Leave blank to keep existing key" : "sk-..."}
+                    value={openaiKey} onChange={e => setOpenaiKey(e.target.value)} disabled={!isAdmin} />
+
+                  <label style={labelStyle}>Model</label>
                   <input style={fieldStyle()} type="text" placeholder="gpt-4o"
-                    value={azureDeployment} onChange={e => setAzureDeployment(e.target.value)} disabled={!isAdmin} />
-
-                  <label style={labelStyle}>API Version</label>
-                  <input style={fieldStyle()} type="text" placeholder="2024-12-01-preview"
-                    value={azureVersion} onChange={e => setAzureVersion(e.target.value)} disabled={!isAdmin} />
+                    value={openaiModel} onChange={e => setOpenaiModel(e.target.value)} disabled={!isAdmin} />
                 </>
               )}
             </div>
@@ -516,6 +550,20 @@ function SettingsModal({ token, currentUser, theme, onClose, onUnauth, onLogoSav
                     <option key={f} value={f}>{f}</option>
                   ))}
                 </select>
+
+                {logoOverride && (
+                  <button
+                    className="deotter-btn"
+                    onClick={async () => {
+                      await authFetch(token, `${API}/settings/clear-logo`, { method: "POST" }, onUnauth);
+                      setLogoOverride("");
+                      if (onLogoSaved) onLogoSaved("");
+                    }}
+                    style={{ margin: "0 0 0.6rem 0", width: "100%", color: "#dc3545", borderColor: "#dc3545" }}
+                  >
+                    Clear logo (use default)
+                  </button>
+                )}
 
                 <input
                   ref={fileInputRef}
@@ -561,7 +609,252 @@ function SettingsModal({ token, currentUser, theme, onClose, onUnauth, onLogoSav
                 {saving ? "Saving…" : "Save Settings"}
               </button>
             )}
+
+            {/* Password Pepper — admin only */}
+            {isAdmin && (
+              <div style={{ marginTop: "1.4rem", borderTop: `1px solid ${theme.selectBorder}`, paddingTop: "1.2rem" }}>
+                <span style={{ fontSize: "0.78rem", color: theme.subtext, textTransform: "uppercase", letterSpacing: "0.08em" }}>
+                  Password Pepper
+                </span>
+                <p style={{ fontSize: "0.75rem", color: "#f0ad4e", margin: "0.4rem 0 0.6rem" }}>
+                  Warning: changing this will invalidate all existing user passwords.
+                </p>
+                <div style={{ position: "relative" }}>
+                  <input
+                    style={{ ...fieldStyle(), paddingRight: "44px", filter: pepperVisible ? "none" : "blur(4px)", transition: "filter 0.2s" }}
+                    type="text"
+                    value={pepper}
+                    onChange={e => setPepper(e.target.value)}
+                  />
+                  <button
+                    onClick={() => setPepperVisible(v => !v)}
+                    title={pepperVisible ? "Hide" : "Reveal"}
+                    style={{ position: "absolute", right: "12px", top: "50%", transform: "translateY(-50%)", background: "none", border: "none", cursor: "pointer", color: theme.subtext, fontSize: "1rem", padding: 0 }}
+                  >
+                    {pepperVisible ? "🙈" : "👁"}
+                  </button>
+                </div>
+                <button
+                  className="deotter-btn"
+                  disabled={pepperSaving}
+                  onClick={async () => {
+                    setPepperSaving(true); setPepperMsg({ text: "", ok: true });
+                    try {
+                      const res = await authFetch(token, `${API}/settings/pepper`, { method: "POST", body: JSON.stringify({ pepper }) }, onUnauth);
+                      const data = await res.json();
+                      setPepperMsg({ text: data.message || data.error, ok: res.ok });
+                    } catch { setPepperMsg({ text: "Could not reach server.", ok: false }); }
+                    setPepperSaving(false);
+                  }}
+                  style={{ marginTop: "0.6rem", marginLeft: 0, width: "100%" }}
+                >
+                  {pepperSaving ? "Saving…" : "Save Pepper"}
+                </button>
+                {pepperMsg.text && (
+                  <p style={{ color: pepperMsg.ok ? "#28a745" : "#dc3545", fontSize: "0.82rem", margin: "0.4rem 0 0" }}>
+                    {pepperMsg.text}
+                  </p>
+                )}
+              </div>
+            )}
           </>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ------------------------------
+// Notifications Bell (admin only)
+// ------------------------------
+function NotificationsPanel({ token, theme, onUnauth }) {
+  const [open, setOpen] = useState(false);
+  const [pendingUsers, setPendingUsers] = useState([]);
+  const [unseenCount, setUnseenCount] = useState(0);
+  const [lastSeen, setLastSeen] = useState(0);
+  const ref = useRef(null);
+  const lastSeenRef = useRef(0);
+
+  const fetchNotifications = async () => {
+    try {
+      const res = await authFetch(token, `${API}/notifications`, {}, onUnauth);
+      if (!res.ok) return;
+      const data = await res.json();
+      const pending = data.pending_users || [];
+      setPendingUsers(pending);
+      setUnseenCount(Math.max(0, pending.length - lastSeenRef.current));
+    } catch {}
+  };
+
+  useEffect(() => {
+    lastSeenRef.current = lastSeen;
+  }, [lastSeen]);
+
+  useEffect(() => {
+    fetchNotifications();
+    const id = setInterval(fetchNotifications, 60000);
+    return () => clearInterval(id);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [token]);
+
+  useEffect(() => {
+    function handleClick(e) { if (ref.current && !ref.current.contains(e.target)) setOpen(false); }
+    document.addEventListener("mousedown", handleClick);
+    return () => document.removeEventListener("mousedown", handleClick);
+  }, []);
+
+  const handleOpen = () => {
+    setOpen(o => !o);
+    if (!open) { setLastSeen(pendingUsers.length); setUnseenCount(0); }
+  };
+
+  return (
+    <div ref={ref} style={{ position: "relative", display: "inline-block" }}>
+      <button
+        onClick={handleOpen}
+        title="Notifications"
+        className="deotter-btn"
+        style={{ position: "relative", width: "40px", height: "40px", borderRadius: "50%", padding: 0, margin: 0 }}
+      >
+        <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+          <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/>
+          <path d="M13.73 21a2 2 0 0 1-3.46 0"/>
+        </svg>
+        {unseenCount > 0 && (
+          <span style={{
+            position: "absolute", top: "-4px", right: "-4px",
+            backgroundColor: "#f0ad4e", color: "#111",
+            borderRadius: "50%", minWidth: "18px", height: "18px",
+            fontSize: "0.65rem", fontFamily: '"Fira Code", monospace',
+            display: "flex", alignItems: "center", justifyContent: "center",
+            fontWeight: "bold", padding: "0 3px",
+          }}>
+            {unseenCount > 9 ? "9+" : unseenCount}
+          </span>
+        )}
+      </button>
+
+      {open && (
+        <div style={{
+          position: "absolute", right: 0, top: "48px",
+          backgroundColor: theme.selectBg, border: `1px solid ${theme.selectBorder}`,
+          borderRadius: "12px", minWidth: "260px",
+          boxShadow: "0 4px 12px rgba(0,0,0,0.15)", zIndex: 2000,
+          fontFamily: '"Fira Code", monospace', fontSize: "0.85rem", overflow: "hidden",
+        }}>
+          <div style={{ padding: "10px 14px", borderBottom: `1px solid ${theme.selectBorder}`, fontWeight: "bold", color: theme.text }}>
+            Pending Approvals
+          </div>
+          {pendingUsers.length === 0 ? (
+            <div style={{ padding: "12px 14px", color: theme.subtext }}>No pending users.</div>
+          ) : pendingUsers.map(u => (
+            <div key={u.username} style={{ padding: "8px 14px", borderBottom: `1px solid ${theme.selectBorder}`, color: theme.text, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+              <span>{u.username}</span>
+              <span style={{ fontSize: "0.72rem", color: "#f0ad4e" }}>pending</span>
+            </div>
+          ))}
+          {pendingUsers.length > 0 && (
+            <div style={{ padding: "8px 14px", color: theme.subtext, fontSize: "0.75rem" }}>
+              Open Admin Panel to approve.
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ------------------------------
+// Admin Panel Modal
+// ------------------------------
+function AdminPanel({ token, theme, onClose, onUnauth }) {
+  const [users, setUsers] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [actionMsg, setActionMsg] = useState("");
+
+  const loadUsers = async () => {
+    setLoading(true);
+    try {
+      const res = await authFetch(token, `${API}/admin/users`, {}, onUnauth);
+      const data = await res.json();
+      if (res.ok) setUsers(data.users || []);
+    } catch {}
+    setLoading(false);
+  };
+
+  useEffect(() => { loadUsers(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const doAction = async (url, method = "POST", body = null) => {
+    setActionMsg("");
+    try {
+      const res = await authFetch(token, url, {
+        method,
+        ...(body ? { body: JSON.stringify(body) } : {}),
+      }, onUnauth);
+      const data = await res.json();
+      setActionMsg(data.message || data.error || "Done.");
+      await loadUsers();
+    } catch { setActionMsg("Request failed."); }
+  };
+
+  const btnStyle = (color) => ({
+    margin: 0, padding: "3px 10px", fontSize: "0.75rem",
+    ...(color ? { color, borderColor: color } : {}),
+  });
+
+  return (
+    <div
+      onClick={e => { if (e.target === e.currentTarget) onClose(); }}
+      style={{ position: "fixed", inset: 0, zIndex: 3000, backgroundColor: "rgba(0,0,0,0.55)", display: "flex", alignItems: "center", justifyContent: "center" }}
+    >
+      <div style={{ backgroundColor: theme.bg, border: `1px solid ${theme.selectBorder}`, borderRadius: "14px", padding: "1.8rem", width: "100%", maxWidth: "640px", fontFamily: '"Fira Code", monospace', color: theme.text, boxShadow: "0 8px 32px rgba(0,0,0,0.25)", maxHeight: "80vh", overflowY: "auto" }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "1.4rem" }}>
+          <h2 style={{ margin: 0, fontSize: "1.05rem" }}>Admin Panel — Users</h2>
+          <button onClick={onClose} className="deotter-btn" style={{ padding: "4px 12px", margin: 0 }}>✕</button>
+        </div>
+
+        {loading ? <p style={{ color: theme.subtext }}>Loading…</p> : (
+          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "0.82rem" }}>
+            <thead>
+              <tr style={{ borderBottom: `1px solid ${theme.selectBorder}`, color: theme.subtext, textAlign: "left" }}>
+                <th style={{ padding: "6px 8px" }}>Username</th>
+                <th style={{ padding: "6px 8px" }}>Role</th>
+                <th style={{ padding: "6px 8px" }}>Status</th>
+                <th style={{ padding: "6px 8px" }}>Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              {users.map(u => (
+                <tr key={u.username} style={{ borderBottom: `1px solid ${theme.selectBorder}` }}>
+                  <td style={{ padding: "8px 8px", color: theme.text }}>{u.username}</td>
+                  <td style={{ padding: "8px 8px", color: theme.subtext }}>{u.role}</td>
+                  <td style={{ padding: "8px 8px", color: u.status === "pending" ? "#f0ad4e" : "#28a745" }}>{u.status}</td>
+                  <td style={{ padding: "6px 8px" }}>
+                    <div style={{ display: "flex", gap: "6px", flexWrap: "wrap" }}>
+                      {u.status === "pending" && (
+                        <button className="deotter-btn" style={{ ...btnStyle("#28a745") }}
+                          onClick={() => doAction(`${API}/admin/users/${u.username}/approve`)}>
+                          Approve
+                        </button>
+                      )}
+                      <button className="deotter-btn" style={{ ...btnStyle(null) }}
+                        onClick={() => doAction(`${API}/admin/users/${u.username}/role`, "POST", { role: u.role === "admin" ? "user" : "admin" })}>
+                        → {u.role === "admin" ? "User" : "Admin"}
+                      </button>
+                      <button className="deotter-btn" style={{ ...btnStyle("#dc3545") }}
+                        onClick={() => { if (window.confirm(`Delete '${u.username}'?`)) doAction(`${API}/admin/users/${u.username}`, "DELETE"); }}>
+                        Delete
+                      </button>
+                    </div>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+
+        {actionMsg && (
+          <p style={{ color: theme.subtext, fontSize: "0.82rem", marginTop: "1rem" }}>{actionMsg}</p>
         )}
       </div>
     </div>
@@ -571,7 +864,7 @@ function SettingsModal({ token, currentUser, theme, onClose, onUnauth, onLogoSav
 // ------------------------------
 // Gear Dropdown
 // ------------------------------
-function GearMenu({ username, role, onLogout, onSettings, theme }) {
+function GearMenu({ username, role, onLogout, onSettings, onAdminPanel, theme }) {
   const [open, setOpen] = useState(false);
   const ref = useRef(null);
 
@@ -621,6 +914,21 @@ function GearMenu({ username, role, onLogout, onSettings, theme }) {
           >
             Settings
           </button>
+          {role === "admin" && (
+            <button
+              onClick={() => { setOpen(false); onAdminPanel(); }}
+              style={{
+                width: "100%", padding: "10px 14px",
+                background: "none", border: "none",
+                borderBottom: `1px solid ${theme.selectBorder}`,
+                color: theme.text, cursor: "pointer",
+                textAlign: "left", fontFamily: '"Fira Code", monospace',
+                fontSize: "0.85rem",
+              }}
+            >
+              Admin Panel
+            </button>
+          )}
           <button
             onClick={() => { setOpen(false); onLogout(); }}
             style={{
@@ -635,6 +943,39 @@ function GearMenu({ username, role, onLogout, onSettings, theme }) {
           </button>
         </div>
       )}
+    </div>
+  );
+}
+
+// ------------------------------
+// Welcome Banner (first login)
+// ------------------------------
+function WelcomeBanner({ username, theme, onDismiss }) {
+  return (
+    <div style={{
+      position: "fixed", bottom: "1.5rem", left: "50%", transform: "translateX(-50%)",
+      zIndex: 4000, maxWidth: "480px", width: "calc(100% - 3rem)",
+      backgroundColor: theme.selectBg, border: `1px solid ${theme.selectBorder}`,
+      borderRadius: "14px", padding: "1.2rem 1.4rem",
+      boxShadow: "0 6px 24px rgba(0,0,0,0.22)",
+      fontFamily: '"Fira Code", monospace', color: theme.text,
+    }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: "12px" }}>
+        <div>
+          <div style={{ fontWeight: "bold", marginBottom: "0.4rem" }}>Welcome to DeOtter, {username}!</div>
+          <div style={{ fontSize: "0.82rem", color: theme.subtext, lineHeight: 1.5 }}>
+            Enjoy deobfuscating JavaScript. If you find it useful, please consider giving it a ⭐ on GitHub!
+          </div>
+          <a
+            href="https://github.com/hackychucky/deotter"
+            target="_blank" rel="noreferrer"
+            style={{ display: "inline-block", marginTop: "0.6rem", fontSize: "0.82rem", color: "#4f8ef7", textDecoration: "none" }}
+          >
+            github.com/hackychucky/deotter →
+          </a>
+        </div>
+        <button onClick={onDismiss} className="deotter-btn" style={{ padding: "4px 10px", margin: 0, flexShrink: 0 }}>✕</button>
+      </div>
     </div>
   );
 }
@@ -666,7 +1007,9 @@ function App() {
   const [showFeedback, setShowFeedback] = useState(false);
   const [usePairs, setUsePairs] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
+  const [showAdminPanel, setShowAdminPanel] = useState(false);
   const [logoOverride, setLogoOverride] = useState("");
+  const [showWelcome, setShowWelcome] = useState(false);
   const [darkMode, setDarkMode] = useState(() => {
     try { return localStorage.getItem("deotter_dark") === "true"; }
     catch { return false; }
@@ -693,6 +1036,7 @@ function App() {
     setCurrentUser(user);
     localStorage.setItem("deotter_token", tok);
     localStorage.setItem("deotter_user", JSON.stringify(user));
+    setShowWelcome(true);
   };
 
   const handleLogout = () => {
@@ -791,7 +1135,10 @@ function App() {
         <span style={{ fontFamily: '"Fira Code", monospace', fontSize: "0.85rem", color: theme.subtext }}>
           {currentUser.username}
         </span>
-        <GearMenu username={currentUser.username} role={currentUser.role} onLogout={handleLogout} onSettings={() => setShowSettings(true)} theme={theme} />
+        {currentUser.role === "admin" && (
+          <NotificationsPanel token={token} theme={theme} onUnauth={handleLogout} />
+        )}
+        <GearMenu username={currentUser.username} role={currentUser.role} onLogout={handleLogout} onSettings={() => setShowSettings(true)} onAdminPanel={() => setShowAdminPanel(true)} theme={theme} />
         <button
           onClick={() => setDarkMode(d => !d)}
           title={darkMode ? "Switch to light mode" : "Switch to dark mode"}
@@ -828,6 +1175,21 @@ function App() {
           onClose={() => setShowSettings(false)}
           onUnauth={handleLogout}
           onLogoSaved={setLogoOverride}
+        />
+      )}
+      {showAdminPanel && (
+        <AdminPanel
+          token={token}
+          theme={theme}
+          onClose={() => setShowAdminPanel(false)}
+          onUnauth={handleLogout}
+        />
+      )}
+      {showWelcome && (
+        <WelcomeBanner
+          username={currentUser.username}
+          theme={theme}
+          onDismiss={() => setShowWelcome(false)}
         />
       )}
 
