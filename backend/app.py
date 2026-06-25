@@ -9,6 +9,7 @@ except ImportError:
     TRANSFORMERS_AVAILABLE = False
 from deotter import (
     gen_report_from_code,
+    deobfuscate_code,
     find_hex_obfuscation,
     find_base64_obfuscation,
     find_string_array_mapping,
@@ -20,10 +21,10 @@ from deotter import (
     find_dynamic_code_generation,
     find_string_concatenation,
 )
-import tempfile
 import subprocess
 import os
 import json
+import datetime
 from db import init_db
 from auth import auth_bp, require_auth
 
@@ -135,31 +136,14 @@ def gen_report_endpoint():
 # ------------------------------
 @app.route('/deobfuscate', methods=['POST'])
 @require_auth
-def deobfuscate_code():
+def deobfuscate_endpoint():
     data = request.get_json()
     code = data.get('code', '')
     detected_patterns = detect_patterns(code)
-    deobfuscated_code = deobfuscate_from_string(code)
+    result = deobfuscate_code(code)
     from db import increment_submissions
     increment_submissions(request.current_user["sub"])
-    return jsonify({"deobfuscated": deobfuscated_code, "patterns": detected_patterns})
-
-
-# Función auxiliar para usar deobfuscate directamente sobre strings
-def deobfuscate_from_string(code_str):
-    # La función deobfuscate en tu deotter.py espera filename
-    # Podemos simularlo usando gen_report_from_code para reportes
-    # o extraer la lógica de deobfuscate directamente:
-    from deotter import deobfuscate  # tu función existente
-    # Crear un archivo temporal para pasarlo a deobfuscate
-    import tempfile
-    with tempfile.NamedTemporaryFile(mode='w+', delete=False) as tmp_file:
-        tmp_file.write(code_str)
-        tmp_file_path = tmp_file.name
-    result = deobfuscate(tmp_file_path)
-    import os
-    os.unlink(tmp_file_path)  # borrar temporal
-    return result
+    return jsonify({"deobfuscated": result, "patterns": detected_patterns})
 
 
 
@@ -304,8 +288,12 @@ def _call_ai(prompt):
             raise RuntimeError("Azure AI Foundry is selected but endpoint, deployment name, or API key is missing. Open Settings to complete the setup.")
         from openai import OpenAI
         client = OpenAI(base_url=azure_endpoint, api_key=azure_key)
-        response = client.responses.create(model=azure_deploy, input=prompt)
-        return response.output_text, "azure"
+        response = client.chat.completions.create(
+            model=azure_deploy,
+            messages=[{"role": "user", "content": prompt}],
+            max_tokens=4096,
+        )
+        return response.choices[0].message.content, "azure"
 
     if provider == "anthropic":
         if not anthropic_key:
@@ -621,5 +609,5 @@ def leaderboard():
 
 
 if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=5001, debug=True)
+    app.run(host='0.0.0.0', port=5050, debug=True)
 

@@ -30,6 +30,10 @@ users.db
 # Developer notes (private)
 notes.md
 
+# SSL certificates (generated at runtime, server-specific)
+backend/cert.pem
+backend/key.pem
+
 
 npm-debug.log*
 yarn-debug.log*

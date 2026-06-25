@@ -23,6 +23,7 @@
 | **Dark / light mode** | Full theme support, persisted across sessions |
 | **Top Deobfuscators** | Submission leaderboard shown on the main page |
 | **Admin panel** | Approve users, change roles, view usage stats |
+| **HTTPS** | Self-signed TLS certificate generated automatically on first run |
 
 ---
 
@@ -49,13 +50,13 @@ DeOtter/
 │   ├── app.py               # Flask API (all endpoints)
 │   ├── deotter.py           # Detection & deobfuscation engine
 │   ├── auth.py              # JWT authentication
-│   ├── db.py                # SQLite database + ORM helpers
+│   ├── db.py                # SQLite database + helpers
 │   ├── manage_users.py      # CLI user management tool
 │   └── models_config.json   # Local model paths (optional)
 ├── frontend/
 │   ├── src/
 │   │   ├── App.js           # React UI
-│   │   └── App.css          # Global styles + .deotter-btn class
+│   │   └── App.css          # Global styles
 │   └── package.json
 └── README.md
 ```
@@ -96,8 +97,10 @@ python3 -m venv venv
 source venv/bin/activate          # macOS / Linux
 # venv\Scripts\activate           # Windows
 
-pip install flask flask-cors anthropic openai PyJWT werkzeug
+pip install flask flask-cors anthropic openai PyJWT werkzeug cryptography
 ```
+
+> `cryptography` is required for HTTPS (auto-generates a self-signed TLS certificate on first run).
 
 ---
 
@@ -118,16 +121,9 @@ export ANTHROPIC_API_KEY=sk-...
 Go to [ai.azure.com](https://ai.azure.com) → Deployments → your deployment → copy Endpoint, Deployment Name, and API Key.
 
 ```bash
-export AZURE_FOUNDRY_ENDPOINT=https://YOUR-RESOURCE.services.ai.azure.com/models
-export AZURE_FOUNDRY_DEPLOYMENT=my-gpt4o-deployment
+export AZURE_FOUNDRY_ENDPOINT=https://YOUR-RESOURCE.services.ai.azure.com/openai/v1
+export AZURE_FOUNDRY_DEPLOYMENT=your-deployment-name
 export AZURE_FOUNDRY_API_KEY=your-azure-key
-```
-
-The backend calls:
-```python
-from openai import OpenAI
-client = OpenAI(base_url=endpoint, api_key=api_key)
-response = client.responses.create(model=deployment_name, input=prompt)
 ```
 
 #### Option C — OpenAI
@@ -167,19 +163,33 @@ npm install
 npm start
 ```
 
-The browser opens automatically at `http://localhost:3000`.
+The app opens at **`https://localhost:3000`**.
 
-**Default login credentials:**
+> **Self-signed certificate warning**: Your browser will warn that the certificate is not trusted. This is expected. Click "Advanced" → "Proceed" (Chrome) or "Accept the Risk" (Firefox) to continue. You may also need to visit `https://localhost:5001` once and accept the cert there too.
+
+---
+
+### Step 5 — First-login security setup
+
+On a fresh install, one default admin account is created:
 
 | Username | Password |
 |----------|----------|
 | `admin` | `pa$$w0rd` |
-| `hackychucky` | `$ucce$$` |
 
-> ⚠️ Change these immediately:
-> ```bash
-> python3 manage_users.py password admin yournewpassword
-> ```
+**Change the password immediately** using the CLI:
+
+```bash
+cd backend && source venv/bin/activate
+python3 manage_users.py password admin YOUR_NEW_STRONG_PASSWORD
+```
+
+Then create your own admin account and delete the default one:
+
+```bash
+python3 manage_users.py create yourname yourpassword --role admin
+python3 manage_users.py delete admin
+```
 
 ---
 
@@ -189,7 +199,7 @@ The browser opens automatically at `http://localhost:3000`.
 git clone https://github.com/hackychucky/deotter.git
 cd DeOtter/backend
 python3 -m venv venv && source venv/bin/activate
-pip install flask flask-cors anthropic openai PyJWT werkzeug
+pip install flask flask-cors anthropic openai PyJWT werkzeug cryptography
 export ANTHROPIC_API_KEY=sk-...
 export DEOTTER_SECRET=change-this
 cd ../frontend && npm install && npm start
@@ -201,10 +211,10 @@ cd ../frontend && npm install && npm start
 git clone https://github.com/hackychucky/deotter.git
 cd DeOtter/backend
 python3 -m venv venv && source venv/bin/activate
-pip install flask flask-cors anthropic openai PyJWT werkzeug
-export AZURE_FOUNDRY_ENDPOINT=https://YOUR-RESOURCE.services.ai.azure.com/models
-export AZURE_FOUNDRY_DEPLOYMENT=my-gpt4o-deployment
-export AZURE_FOUNDRY_API_KEY=your-key
+pip install flask flask-cors anthropic openai PyJWT werkzeug cryptography
+export AZURE_FOUNDRY_ENDPOINT=https://YOUR-RESOURCE.services.ai.azure.com/openai/v1
+export AZURE_FOUNDRY_DEPLOYMENT=your-deployment-name
+export AZURE_FOUNDRY_API_KEY=your-azure-key
 export DEOTTER_SECRET=change-this
 cd ../frontend && npm install && npm start
 ```
@@ -237,8 +247,16 @@ Edit `backend/models_config.json`:
 
 Model files must be downloaded locally first (e.g. via `huggingface-cli download`).
 
-> **Important:** Only generative models work — `text-generation` (causal LM: StarCoder, Mistral, GPT-2) or `text2text-generation` (seq2seq: CodeT5, T5).  
-> Encoder-only models like **CodeBERT** cannot generate text and will fail to load.
+### Compatible models
+
+DeOtter works with any locally-downloaded HuggingFace generative model:
+
+| Type | Examples |
+|------|---------|
+| `text-generation` (causal LM) | StarCoder2, Mistral 7B, CodeLlama, DeepSeek-Coder, Phi-3, Qwen2.5-Coder, LLaMA 3 |
+| `text2text-generation` (seq2seq) | CodeT5, CodeT5+, T5, Flan-T5 |
+
+> **Note:** Encoder-only models (CodeBERT, RoBERTa, BERT) cannot generate text and will fail to load.
 
 ### Usage
 
@@ -256,8 +274,8 @@ All user management is done via CLI from the `backend/` directory with the venv 
 cd backend && source venv/bin/activate
 
 python3 manage_users.py list
-python3 manage_users.py create alice secret123
-python3 manage_users.py create bob pass456 --role admin
+python3 manage_users.py create alice --role user
+python3 manage_users.py create bob --role admin
 python3 manage_users.py password alice newpassword
 python3 manage_users.py delete alice
 ```
@@ -294,7 +312,8 @@ Tick **"Use training pairs (N)"** to include saved examples in the AI prompt. Th
 ## Notes
 
 - Flask runs on port **5001** (macOS AirPlay Receiver occupies 5000).
-- `npm start` from `frontend/` launches both Flask and React automatically via `concurrently`.
+- React runs on port **3000**. Both are started together via `npm start` from `frontend/`.
+- The app runs over **HTTPS** — a self-signed cert is generated automatically in `backend/` on first run.
 - Set `DEOTTER_SECRET` permanently to avoid JWT expiry on Flask restarts.
 - Training pairs are local to the browser — use **Download** to back them up.
 - Rule-based deobfuscation and reports work fully offline with no API key.

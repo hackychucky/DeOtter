@@ -83,16 +83,12 @@ def init_db():
     _pepper_row = conn.execute("SELECT value FROM settings WHERE key = 'pepper'").fetchone()
     pepper = (_pepper_row["value"] if _pepper_row else None) or DEFAULT_PEPPER
 
-    # Seed default admin users on fresh database
+    # Seed default admin on fresh database — change password immediately after first login
     if conn.execute("SELECT COUNT(*) FROM users").fetchone()[0] == 0:
-        for username, password, role in [
-            ("admin",       "pa$$w0rd", "admin"),
-            ("hackychucky", "$ucce$$",  "admin"),
-        ]:
-            conn.execute(
-                "INSERT INTO users (username, email, password, role, status) VALUES (?, ?, ?, ?, ?)",
-                (username, "", generate_password_hash(password + pepper, method="pbkdf2:sha256"), role, "active"),
-            )
+        conn.execute(
+            "INSERT INTO users (username, email, password, role, status) VALUES (?, ?, ?, ?, ?)",
+            ("admin", "", generate_password_hash("admin" + pepper, method="pbkdf2:sha256"), "admin", "active"),
+        )
         conn.commit()
 
     conn.close()

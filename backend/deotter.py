@@ -527,71 +527,73 @@ def deobfuscate_arithmetic(content):
     return re.sub(pattern, replace_with_value, content)
 
 
+def deobfuscate_code(content):
+    # \x hex escapes: \x41 -> 'A'
+    def replace_hex(m):
+        try:
+            return chr(int(m.group(1), 16))
+        except Exception:
+            return m.group(0)
+    content = re.sub(r'\\x([0-9a-fA-F]{2})', replace_hex, content)
+
+    # \uNNNN Unicode escapes: \u0041 -> 'A'
+    def replace_unicode(m):
+        try:
+            return chr(int(m.group(1), 16))
+        except Exception:
+            return m.group(0)
+    content = re.sub(r'\\u([0-9a-fA-F]{4})', replace_unicode, content)
+
+    # \u{NNNNN} extended Unicode escapes: \u{1F600} -> emoji
+    def replace_unicode_ext(m):
+        try:
+            return chr(int(m.group(1), 16))
+        except Exception:
+            return m.group(0)
+    content = re.sub(r'\\u\{([0-9a-fA-F]{1,6})\}', replace_unicode_ext, content)
+
+    # Base64 deobfuscation
+    base64_data = find_base64_obfuscation(content)
+    for match in base64_data["matches"]:
+        try:
+            padded = match + '=' * (-len(match) % 4)
+            decoded = base64.b64decode(padded).decode('utf-8')
+            content = content.replace(match, decoded)
+        except Exception:
+            continue
+
+    # String Array Mapping deobfuscation
+    string_array_data = find_string_array_mapping(content)
+    if string_array_data["matches"]:
+        var_dict = {}
+        for var_name, var_value in string_array_data["matches"]:
+            if var_value.startswith("[") and var_value.endswith("]"):
+                pairs = re.findall(r'"(.*?)"|\'(.*?)\'', var_value)
+                var_dict[var_name] = [a or b for a, b in pairs]
+            else:
+                var_dict[var_name] = var_value.strip('\'"')
+        for var_name, var_value in var_dict.items():
+            if isinstance(var_value, list):
+                for i, item in enumerate(var_value):
+                    content = re.sub(rf'\b{re.escape(var_name)}\[{i}\]\b', item, content)
+            else:
+                content = re.sub(rf'\b{re.escape(var_name)}\b', var_value, content)
+
+    # Arithmetic deobfuscation
+    def eval_arith(m):
+        try:
+            return str(eval(m.group(0)))
+        except Exception:
+            return m.group(0)
+    content = re.sub(r'\b\d+\s*[\+\-\*/]\s*\d+(\s*[\+\-\*/]\s*\d+)*\b', eval_arith, content)
+
+    return content
+
+
 def deobfuscate(filename):
     try:
         with open(filename, 'r') as file:
-            content = file.read()  # Reads the entire content of the specified file
-
-            # HEX deobfuscation
-            hex_data = find_hex_obfuscation(content)  # Executes find_hex_obfuscation function to find hexadecimals in the content
-            if hex_data["matches"]:
-                for match in hex_data["matches"]:
-                    # Convert each hex match to a character
-                    hex_value = match.replace("\\x", "")  # Removes the \x prefix from the hexadecimal sequence
-                    char = bytes.fromhex(hex_value).decode('utf-8')  # Converts the hexadecimal sequence into a character
-                    content = content.replace(match, char)  # Replaces the hexadecimal sequence with the corresponding character
-
-            # BASE64 deobfuscation
-            base64_data = find_base64_obfuscation(content)  # Executes find_base64_obfuscation function to find base64 in the content
-            if base64_data["matches"]:
-                for match in base64_data["matches"]:
-                    try:
-                        decoded = base64.b64decode(match).decode('utf-8')  # Attempts to decode the base64 sequence
-                        content = content.replace(match, decoded)  # Replaces the base64 sequence with the decoded content
-                    except Exception as e:
-                        print(f"Failed to decode base64 sequence: {match}, Error: {e}")
-                        continue  # If an error occurs during decoding, skip the current match
-
-            # String Array Mapping deobfuscation
-            string_array_data = find_string_array_mapping(content)
-            if string_array_data["matches"]:
-                var_dict = {}
-                for var_name, var_value in string_array_data["matches"]:
-                    # Process the value of the array or string
-                    if var_value.startswith("[") and var_value.endswith("]"):
-                        # Handle the case of an array
-                        elements = re.findall(r'\"(.*?)\"|\'.*?\'', var_value)  # Extracts the elements of the array
-                        var_dict[var_name] = elements
-                    else:
-                        # Handle the case of a single string
-                        var_dict[var_name] = var_value.strip('\'"')
-
-                # Replace variable references with their values
-                for var_name, var_value in var_dict.items():
-                    if isinstance(var_value, list):
-                        # Replace array accesses like x[0], x[1]
-                        for i, item in enumerate(var_value):
-                            content = re.sub(rf'\b{re.escape(var_name)}\[{i}\]\b', item, content)
-                    else:
-                        # Replace the variable directly if it's a string
-                        content = re.sub(rf'\b{re.escape(var_name)}\b', var_value, content)
-
-
-              # Arithmetic Deobfuscation (simplified version)
-            def evaluate_expression(expr):
-                try:
-                    # Evaluate arithmetic expression
-                    return str(eval(expr))
-                except:
-                    return expr
-
-            arithmetic_patterns = re.findall(r'\b\d+\s*[\+\-\*/]\s*\d+(\s*[\+\-\*/]\s*\d+)*\b', content)
-            for pattern in arithmetic_patterns:
-                result = evaluate_expression(pattern)
-                content = content.replace(pattern, result)
-
-
-            return content  # Returns the deobfuscated content
+            return deobfuscate_code(file.read())
     except FileNotFoundError:
         return f"File {filename} not found. Please, verify filename and filepath."
     

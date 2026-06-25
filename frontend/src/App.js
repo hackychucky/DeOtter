@@ -5,7 +5,7 @@ import "prismjs/components/prism-javascript";
 import "prismjs/themes/prism-tomorrow.css";
 import "./App.css";
 
-const API = `http://${window.location.hostname}:5001`;
+const API = `http://${window.location.hostname}:5050`;
 
 const COMPATIBLE_MODELS = [
   "Mistral 7B / Mixtral",
@@ -1428,7 +1428,7 @@ function App() {
       {/* Tabs */}
       <div style={{ marginBottom: "1.5rem" }}>
         <button className="deotter-btn" style={{ opacity: tab === "deobfuscate" ? 1 : 0.55 }} onClick={() => setTab("deobfuscate")}>Deobfuscate</button>
-        <button className="deotter-btn" style={{ opacity: tab === "lab" ? 1 : 0.55 }} onClick={() => setTab("lab")}>Lab</button>
+        <button className="deotter-btn" style={{ opacity: tab === "lab" ? 1 : 0.55 }} onClick={() => setTab("lab")}>LMI</button>
       </div>
 
       {showSettings && (
@@ -1495,6 +1495,14 @@ function App() {
           </div>
         </div>
       )}
+      {/* Version label */}
+      <div style={{
+        position: "fixed", bottom: "0.6rem", left: "0.8rem",
+        fontFamily: '"Fira Code", monospace', fontSize: "0.68rem",
+        color: theme.subtext, opacity: 0.5, pointerEvents: "none",
+      }}>
+        DeOtter v2.0.1 — June 2026
+      </div>
     </div>
   );
 }
