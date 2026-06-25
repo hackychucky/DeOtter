@@ -13,17 +13,18 @@
 | Feature | Details |
 |---|---|
 | **User authentication** | Login / sign-up with admin approval, admin and user roles |
-| **Rule-based deobfuscation** | Decodes hex, base64, string arrays, arithmetic — no AI needed |
+| **Rule-based deobfuscation** | Decodes `\x` hex, `\u` unicode, base64, string arrays, arithmetic |
 | **Obfuscation report** | Detects 10 techniques and generates a detailed analysis |
 | **AI deobfuscation** | Anthropic Claude, Azure AI Foundry, or OpenAI |
-| **Local model inference** | Run local LLMs (CodeT5, StarCoder, Mistral, etc.) via the Lab tab |
+| **Local model inference** | Run local LLMs (CodeT5, StarCoder, Mistral, etc.) via the LMI tab |
 | **Training pair system** | Save good/bad AI results to teach the model your patterns |
 | **Pattern-aware AI** | Detected techniques guide which training examples are sent to the AI |
 | **Syntax-highlighted editor** | Input and output with JS highlighting |
 | **Dark / light mode** | Full theme support, persisted across sessions |
 | **Top Deobfuscators** | Submission leaderboard shown on the main page |
 | **Admin panel** | Approve users, change roles, view usage stats |
-| **HTTPS** | Self-signed TLS certificate generated automatically on first run |
+| **Password pepper** | Server-side secret appended before hashing, configurable in Settings |
+| **Custom logo** | Upload a custom logo via Settings (admin only) |
 
 ---
 
@@ -39,6 +40,23 @@
 - Arithmetic obfuscation
 - Minification
 - Dynamic code generation (`eval`, `new Function`, `fetch`, etc.)
+
+---
+
+## Rule-based engine — what it can and cannot do
+
+The **Deobfuscate** button runs a regex-based engine. It handles:
+
+| What | Example |
+|---|---|
+| `\x` hex escapes | `\x68\x65\x6c\x6c\x6f` → `hello` |
+| `\uNNNN` Unicode escapes | `\u0068\u0065\u006c\u006c\u006f` → `hello` |
+| `\u{NNNNN}` extended escapes | `\u{1F600}` → `😀` |
+| Inline base64 strings | `aGVsbG8=` → `hello` |
+| Simple string arrays | `var a=["eval","doc"]; a[0]` → `"eval"` |
+| Arithmetic | `3+5` → `8` |
+
+It **cannot** handle code produced by obfuscator.io or similar tools that use decoder functions (`_0x####('0x1a','key')`), self-bootstrapping array shufflers, or control-flow flattening. For those, use **Deobfuscate using DeOtter AI**.
 
 ---
 
@@ -94,13 +112,10 @@ cd DeOtter
 ```bash
 cd backend
 python3 -m venv venv
-source venv/bin/activate          # macOS / Linux
-# venv\Scripts\activate           # Windows
-
-pip install flask flask-cors anthropic openai PyJWT werkzeug cryptography
+pip install flask flask-cors anthropic openai PyJWT werkzeug
 ```
 
-> `cryptography` is required for HTTPS (auto-generates a self-signed TLS certificate on first run).
+> No need to activate the venv manually — `npm start` uses it directly.
 
 ---
 
@@ -163,9 +178,14 @@ npm install
 npm start
 ```
 
-The app opens at **`https://localhost:3000`**.
+The app opens at **`http://localhost:3000`**.
 
-> **Self-signed certificate warning**: Your browser will warn that the certificate is not trusted. This is expected. Click "Advanced" → "Proceed" (Chrome) or "Accept the Risk" (Firefox) to continue. You may also need to visit `https://localhost:5001` once and accept the cert there too.
+> **macOS AirPlay conflict**: macOS AirPlay Receiver occupies port 5001. Either disable it in  
+> **System Settings → General → AirDrop & Handoff → AirPlay Receiver**, or run Flask on a different port:
+> ```bash
+> export PORT=5050
+> npm start
+> ```
 
 ---
 
@@ -180,7 +200,7 @@ On a fresh install, one default admin account is created:
 **Change the password immediately** using the CLI:
 
 ```bash
-cd backend && source venv/bin/activate
+cd backend
 python3 manage_users.py password admin YOUR_NEW_STRONG_PASSWORD
 ```
 
@@ -198,8 +218,8 @@ python3 manage_users.py delete admin
 ```bash
 git clone https://github.com/hackychucky/deotter.git
 cd DeOtter/backend
-python3 -m venv venv && source venv/bin/activate
-pip install flask flask-cors anthropic openai PyJWT werkzeug cryptography
+python3 -m venv venv
+pip install flask flask-cors anthropic openai PyJWT werkzeug
 export ANTHROPIC_API_KEY=sk-...
 export DEOTTER_SECRET=change-this
 cd ../frontend && npm install && npm start
@@ -210,8 +230,8 @@ cd ../frontend && npm install && npm start
 ```bash
 git clone https://github.com/hackychucky/deotter.git
 cd DeOtter/backend
-python3 -m venv venv && source venv/bin/activate
-pip install flask flask-cors anthropic openai PyJWT werkzeug cryptography
+python3 -m venv venv
+pip install flask flask-cors anthropic openai PyJWT werkzeug
 export AZURE_FOUNDRY_ENDPOINT=https://YOUR-RESOURCE.services.ai.azure.com/openai/v1
 export AZURE_FOUNDRY_DEPLOYMENT=your-deployment-name
 export AZURE_FOUNDRY_API_KEY=your-azure-key
@@ -223,13 +243,12 @@ cd ../frontend && npm install && npm start
 
 ## Local Model Inference (optional)
 
-DeOtter can run local generative models via HuggingFace Transformers in the **Lab** tab.
+DeOtter can run local generative models via HuggingFace Transformers in the **LMI** tab.
 
 ### Install dependencies (heavy — ≈2 GB)
 
 ```bash
 cd backend
-source venv/bin/activate
 pip install torch transformers
 ```
 
@@ -260,7 +279,7 @@ DeOtter works with any locally-downloaded HuggingFace generative model:
 
 ### Usage
 
-1. Go to the **Lab** tab.
+1. Go to the **LMI** tab.
 2. Select a model from the dropdown and click **Load Model**.
 3. Paste JavaScript code and click **Deobfuscate with Local Model**.
 
@@ -268,19 +287,19 @@ DeOtter works with any locally-downloaded HuggingFace generative model:
 
 ## Managing Users
 
-All user management is done via CLI from the `backend/` directory with the venv activated.
+All user management can be done via CLI from the `backend/` directory.
 
 ```bash
-cd backend && source venv/bin/activate
+cd backend
 
 python3 manage_users.py list
-python3 manage_users.py create alice --role user
-python3 manage_users.py create bob --role admin
+python3 manage_users.py create alice secret --role user
+python3 manage_users.py create bob secret --role admin
 python3 manage_users.py password alice newpassword
 python3 manage_users.py delete alice
 ```
 
-New users who sign up via the web UI start in **pending** status and need admin approval. Admins see a notification bell and can approve via the **Admin Panel**.
+New users who sign up via the web UI start in **pending** status and need admin approval. Admins see a notification bell and can approve via the **Admin Panel** (gear icon → Admin Panel).
 
 ---
 
@@ -291,7 +310,7 @@ New users who sign up via the web UI start in **pending** status and need admin 
 1. Log in with your credentials.
 2. Paste obfuscated JavaScript into the editor.
 3. Choose an action:
-   - **Deobfuscate** — rule-based engine, no API key required
+   - **Deobfuscate** — rule-based engine, no API key required (see limitations above)
    - **Create Obfuscation Report** — detailed technique breakdown
    - **Deobfuscate using DeOtter AI** — sends code to the configured AI provider
 4. After an AI result, **Good / Bad** buttons appear:
@@ -302,7 +321,7 @@ Tick **"Use training pairs (N)"** to include saved examples in the AI prompt. Th
 
 ---
 
-### Lab tab
+### LMI tab
 
 - **Local Model Inference**: select and load a local HuggingFace model, then run it on any JavaScript code.
 - **Training Pairs**: build a dataset of obfuscated/clean pairs to improve AI prompts. Pairs are stored in the browser's localStorage. Use **Download** to back them up.
@@ -311,9 +330,10 @@ Tick **"Use training pairs (N)"** to include saved examples in the AI prompt. Th
 
 ## Notes
 
-- Flask runs on port **5001** (macOS AirPlay Receiver occupies 5000).
+- Flask runs on port **5001** by default. Override with `export PORT=XXXX` before `npm start`.
+- macOS users: AirPlay Receiver occupies port 5001 — disable it or set `export PORT=5050`.
 - React runs on port **3000**. Both are started together via `npm start` from `frontend/`.
-- The app runs over **HTTPS** — a self-signed cert is generated automatically in `backend/` on first run.
+- The app runs over plain **HTTP** — do not expose it on a public network without a reverse proxy.
 - Set `DEOTTER_SECRET` permanently to avoid JWT expiry on Flask restarts.
 - Training pairs are local to the browser — use **Download** to back them up.
 - Rule-based deobfuscation and reports work fully offline with no API key.

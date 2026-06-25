@@ -5,7 +5,7 @@ import "prismjs/components/prism-javascript";
 import "prismjs/themes/prism-tomorrow.css";
 import "./App.css";
 
-const API = `http://${window.location.hostname}:5050`;
+const API = `http://${window.location.hostname}:5001`;
 
 const COMPATIBLE_MODELS = [
   "Mistral 7B / Mixtral",
