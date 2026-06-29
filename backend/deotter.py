@@ -278,6 +278,88 @@ def find_dynamic_code_generation(content):
     }
 
 
+# FUNCTION THAT DETECTS IOCs
+def find_iocs(content):
+    iocs = {
+        "ipv4": [],
+        "urls": [],
+        "domains": [],
+        "emails": [],
+        "win_paths": [],
+        "unix_paths": [],
+        "suspicious_files": [],
+        "registry_keys": [],
+        "hashes": [],
+    }
+
+    # IPv4 — strict octet validation (0-255), skip version strings like 1.0.0
+    ipv4_re = re.compile(
+        r'\b((?:(?:25[0-5]|2[0-4]\d|[01]?\d\d?)\.){3}(?:25[0-5]|2[0-4]\d|[01]?\d\d?))\b'
+    )
+    # Exclude obvious non-IPs: 0.0.0.0, 255.255.255.255 as placeholders only if they're the ONLY thing
+    iocs["ipv4"] = list({m for m in ipv4_re.findall(content)
+                         if m not in ("0.0.0.0", "255.255.255.255")})
+
+    # URLs — http/https/ftp/ws/wss, stop at whitespace or quote/bracket
+    url_re = re.compile(r'(?:https?|ftp|wss?)://[^\s\'"<>()\[\]\\,;{}]+', re.IGNORECASE)
+    iocs["urls"] = list(set(url_re.findall(content)))
+
+    # Domains — look inside string literals to reduce false positives
+    # Match: something.tld or sub.something.tld inside quotes
+    tlds = r'(?:com|net|org|io|xyz|ru|cn|tk|top|info|biz|cc|pw|me|co|gov|edu|mil|app|dev|onion|site|online|store|click|live|icu|buzz|sh|to|us|uk|de|fr|br|in|jp|au)'
+    domain_re = re.compile(
+        r'["\']([a-zA-Z0-9](?:[a-zA-Z0-9\-]{0,61}[a-zA-Z0-9])?'
+        r'(?:\.[a-zA-Z0-9](?:[a-zA-Z0-9\-]{0,61}[a-zA-Z0-9])?)*\.' + tlds + r')["\']',
+        re.IGNORECASE
+    )
+    found_domains = set(domain_re.findall(content))
+    # Remove anything already captured as part of a URL
+    url_text = ' '.join(iocs["urls"])
+    iocs["domains"] = [d for d in found_domains if d not in url_text]
+
+    # Email addresses
+    email_re = re.compile(r'\b[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}\b')
+    iocs["emails"] = list(set(email_re.findall(content)))
+
+    # Windows paths: C:\..., %APPDATA%\..., \\server\share
+    win_path_re = re.compile(
+        r'(?:[A-Za-z]:\\|\\\\|%\w+%\\)[^\s\'"<>|?*\r\n]{2,}',
+        re.IGNORECASE
+    )
+    iocs["win_paths"] = list(set(win_path_re.findall(content)))
+
+    # Unix paths: /etc/, /tmp/, /var/, /home/, /usr/, /bin/, /proc/ etc.
+    unix_path_re = re.compile(
+        r'(?<![a-zA-Z0-9_])((?:/(?:etc|tmp|var|usr|home|bin|sbin|proc|sys|dev|root|opt|run|srv|mnt)'
+        r'(?:/[^\s\'"<>;|&\r\n]*){1,}))',
+    )
+    iocs["unix_paths"] = list(set(unix_path_re.findall(content)))
+
+    # Suspicious filenames — executable/script extensions inside string literals
+    sus_file_re = re.compile(
+        r'["\']([^"\'<>|?*\r\n]{1,80}\.'
+        r'(?:exe|dll|bat|cmd|ps1|vbs|js|jse|wsf|wsh|hta|scr|pif|msi|jar|sh|bash|php|asp|aspx|cgi|py|rb))["\']',
+        re.IGNORECASE
+    )
+    iocs["suspicious_files"] = list(set(sus_file_re.findall(content)))
+
+    # Windows registry keys
+    reg_re = re.compile(
+        r'(?:HKEY_LOCAL_MACHINE|HKEY_CURRENT_USER|HKEY_CLASSES_ROOT|HKEY_USERS|'
+        r'HKEY_CURRENT_CONFIG|HKLM|HKCU|HKCR|HKU)'
+        r'(?:\\[^\s\'"<>;,\r\n]+)+',
+        re.IGNORECASE
+    )
+    iocs["registry_keys"] = list(set(reg_re.findall(content)))
+
+    # Cryptographic hashes — MD5 (32), SHA1 (40), SHA256 (64) hex strings in quotes
+    hash_re = re.compile(r'["\']([0-9a-fA-F]{64}|[0-9a-fA-F]{40}|[0-9a-fA-F]{32})["\']')
+    iocs["hashes"] = list(set(hash_re.findall(content)))
+
+    iocs["total"] = sum(len(v) for v in iocs.values() if isinstance(v, list))
+    return iocs
+
+
 # FUNCTION THAT GENERATES REPORT
 def generate_report(filename):
     try:
@@ -390,7 +472,7 @@ def generate_report(filename):
 def gen_report_from_code(code_str):
     try:
     
-        content = code_str  # Reads the content from the string 
+        content = code_str
 
         hex_data = find_hex_obfuscation(content)
         base64_data = find_base64_obfuscation(content)
@@ -402,6 +484,10 @@ def gen_report_from_code(code_str):
         concat_data = find_string_concatenation(content)
         minification_data = find_minification(content)
         dynamic_code_data = find_dynamic_code_generation(content)
+
+        # Deobfuscate first so IOCs hidden inside \x / \u / base64 are visible
+        decoded = deobfuscate_code(content)
+        ioc_data = find_iocs(decoded)
 
         report = ""
 
@@ -481,12 +567,52 @@ def gen_report_from_code(code_str):
         else:
             report += "No possible C&C server addresses detected.\n"
 
+        # IOC section
+        if ioc_data["total"] > 0:
+            report += f"\n{'='*50}\n"
+            report += f"· IOCs detected ({ioc_data['total']} total):\n"
+            if ioc_data["ipv4"]:
+                report += f"\n  [IP Addresses]\n"
+                for ip in sorted(ioc_data["ipv4"]):
+                    report += f"    {ip}\n"
+            if ioc_data["urls"]:
+                report += f"\n  [URLs]\n"
+                for url in sorted(ioc_data["urls"]):
+                    report += f"    {url}\n"
+            if ioc_data["domains"]:
+                report += f"\n  [Domains]\n"
+                for d in sorted(ioc_data["domains"]):
+                    report += f"    {d}\n"
+            if ioc_data["emails"]:
+                report += f"\n  [Email Addresses]\n"
+                for e in sorted(ioc_data["emails"]):
+                    report += f"    {e}\n"
+            if ioc_data["win_paths"]:
+                report += f"\n  [Windows Paths]\n"
+                for p in sorted(ioc_data["win_paths"]):
+                    report += f"    {p}\n"
+            if ioc_data["unix_paths"]:
+                report += f"\n  [Unix Paths]\n"
+                for p in sorted(ioc_data["unix_paths"]):
+                    report += f"    {p}\n"
+            if ioc_data["suspicious_files"]:
+                report += f"\n  [Suspicious Filenames]\n"
+                for f in sorted(ioc_data["suspicious_files"]):
+                    report += f"    {f}\n"
+            if ioc_data["registry_keys"]:
+                report += f"\n  [Registry Keys]\n"
+                for k in sorted(ioc_data["registry_keys"]):
+                    report += f"    {k}\n"
+            if ioc_data["hashes"]:
+                report += f"\n  [Hashes (MD5/SHA1/SHA256)]\n"
+                for h in sorted(ioc_data["hashes"]):
+                    report += f"    {h}\n"
+        else:
+            report += "\nNo IOCs detected.\n"
 
+        print(report)
+        return report
 
-        # Print report to stdout
-        print(report)  # Prints the report to standard output (console)
-        return report  # Returns the generated report
-    
     except FileNotFoundError:
         error_message = f"Error generating report:\n"
         print(error_message)  # Prints error message if the file is not found
@@ -575,9 +701,9 @@ def deobfuscate_code(content):
         for var_name, var_value in var_dict.items():
             if isinstance(var_value, list):
                 for i, item in enumerate(var_value):
-                    content = re.sub(rf'\b{re.escape(var_name)}\[{i}\]\b', item, content)
+                    content = re.sub(rf'\b{re.escape(var_name)}\[{i}\]\b', lambda m, r=item: r, content)
             else:
-                content = re.sub(rf'\b{re.escape(var_name)}\b', var_value, content)
+                content = re.sub(rf'\b{re.escape(var_name)}\b', lambda m, r=var_value: r, content)
 
     # Arithmetic deobfuscation
     def eval_arith(m):

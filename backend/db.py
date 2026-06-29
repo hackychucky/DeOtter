@@ -41,6 +41,10 @@ def check_password(stored_hash, password):
     return check_password_hash(stored_hash, password + _get_pepper())
 
 
+import json as _json
+import datetime as _dt
+
+
 def init_db():
     conn = get_conn()
 
@@ -90,6 +94,31 @@ def init_db():
             ("admin", "", generate_password_hash("admin" + pepper, method="pbkdf2:sha256"), "admin", "active"),
         )
         conn.commit()
+
+    # Threat actor tables
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS threat_actors (
+            id          INTEGER PRIMARY KEY AUTOINCREMENT,
+            name        TEXT UNIQUE NOT NULL,
+            description TEXT NOT NULL DEFAULT '',
+            created_by  TEXT NOT NULL DEFAULT '',
+            created_at  TEXT NOT NULL DEFAULT ''
+        )
+    """)
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS threat_actor_samples (
+            id              INTEGER PRIMARY KEY AUTOINCREMENT,
+            threat_actor_id INTEGER NOT NULL,
+            code_snippet    TEXT NOT NULL DEFAULT '',
+            techniques      TEXT NOT NULL DEFAULT '[]',
+            notes           TEXT NOT NULL DEFAULT '',
+            source          TEXT NOT NULL DEFAULT 'report',
+            created_by      TEXT NOT NULL DEFAULT '',
+            created_at      TEXT NOT NULL DEFAULT '',
+            FOREIGN KEY (threat_actor_id) REFERENCES threat_actors(id) ON DELETE CASCADE
+        )
+    """)
+    conn.commit()
 
     conn.close()
 
@@ -188,3 +217,108 @@ def count_pending_users():
     count = conn.execute("SELECT COUNT(*) FROM users WHERE status = 'pending'").fetchone()[0]
     conn.close()
     return count
+
+
+# ──────────────────────────────────────────
+# THREAT ACTOR ATTRIBUTION
+# ──────────────────────────────────────────
+
+def list_threat_actors():
+    conn = get_conn()
+    rows = conn.execute("""
+        SELECT ta.id, ta.name, ta.description, ta.created_by, ta.created_at,
+               COUNT(s.id) AS sample_count
+        FROM threat_actors ta
+        LEFT JOIN threat_actor_samples s ON s.threat_actor_id = ta.id
+        GROUP BY ta.id
+        ORDER BY ta.name
+    """).fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+
+def create_threat_actor(name, description, created_by):
+    conn = get_conn()
+    try:
+        conn.execute(
+            "INSERT INTO threat_actors (name, description, created_by, created_at) VALUES (?, ?, ?, ?)",
+            (name.strip(), description.strip(), created_by, _dt.datetime.utcnow().isoformat()),
+        )
+        conn.commit()
+        return True, None
+    except sqlite3.IntegrityError:
+        return False, f"Threat actor '{name}' already exists."
+    finally:
+        conn.close()
+
+
+def update_threat_actor(actor_id, name, description):
+    conn = get_conn()
+    cur = conn.execute(
+        "UPDATE threat_actors SET name = ?, description = ? WHERE id = ?",
+        (name.strip(), description.strip(), actor_id),
+    )
+    conn.commit()
+    updated = cur.rowcount > 0
+    conn.close()
+    return updated
+
+
+def delete_threat_actor(actor_id):
+    conn = get_conn()
+    cur = conn.execute("DELETE FROM threat_actors WHERE id = ?", (actor_id,))
+    conn.commit()
+    deleted = cur.rowcount > 0
+    conn.close()
+    return deleted
+
+
+def add_threat_actor_sample(actor_id, code_snippet, techniques, notes, source, created_by):
+    conn = get_conn()
+    conn.execute(
+        "INSERT INTO threat_actor_samples "
+        "(threat_actor_id, code_snippet, techniques, notes, source, created_by, created_at) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?)",
+        (
+            actor_id,
+            code_snippet[:1000],
+            _json.dumps(techniques if isinstance(techniques, list) else []),
+            notes,
+            source,
+            created_by,
+            _dt.datetime.utcnow().isoformat(),
+        ),
+    )
+    conn.commit()
+    conn.close()
+
+
+def get_threat_actor_samples(actor_id):
+    conn = get_conn()
+    rows = conn.execute(
+        "SELECT * FROM threat_actor_samples WHERE threat_actor_id = ? ORDER BY created_at DESC",
+        (actor_id,),
+    ).fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+
+def delete_threat_actor_sample(sample_id):
+    conn = get_conn()
+    cur = conn.execute("DELETE FROM threat_actor_samples WHERE id = ?", (sample_id,))
+    conn.commit()
+    deleted = cur.rowcount > 0
+    conn.close()
+    return deleted
+
+
+def get_all_samples_for_attribution():
+    conn = get_conn()
+    rows = conn.execute("""
+        SELECT s.id, s.threat_actor_id, s.techniques,
+               ta.name AS actor_name, ta.description AS actor_description
+        FROM threat_actor_samples s
+        JOIN threat_actors ta ON ta.id = s.threat_actor_id
+    """).fetchall()
+    conn.close()
+    return [dict(r) for r in rows]

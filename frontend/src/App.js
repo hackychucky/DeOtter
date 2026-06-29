@@ -166,7 +166,7 @@ function LoginPage({ onLogin, theme, darkMode, logoOverride }) {
 // ------------------------------
 function LabPage({ obfuscated, setObfuscated, clean, setClean, pairs, setPairs,
                    availableModels, selectedModel, setSelectedModel,
-                   token, theme, handleLogout }) {
+                   token, theme, handleLogout, onAttribution }) {
   const highlight = (code) => Prism.highlight(code, Prism.languages.javascript, "javascript");
 
   const handleAddPair = () => {
@@ -206,6 +206,7 @@ function LabPage({ obfuscated, setObfuscated, clean, setClean, pairs, setPairs,
   const [loadMsg, setLoadMsg] = useState({ text: "", ok: true });
   const [localCode, setLocalCode] = useState("");
   const [localOutput, setLocalOutput] = useState("");
+  const [localPatterns, setLocalPatterns] = useState([]);
   const [runningLocal, setRunningLocal] = useState(false);
   const [modelPolicy, setModelPolicy] = useState({});
 
@@ -230,11 +231,14 @@ function LabPage({ obfuscated, setObfuscated, clean, setClean, pairs, setPairs,
   };
 
   const handleLocalDeobfuscate = async () => {
-    setRunningLocal(true); setLocalOutput("");
+    setRunningLocal(true); setLocalOutput(""); setLocalPatterns([]);
     try {
       const res = await authFetch(token, `${API}/local-deobfuscate`, { method: "POST", body: JSON.stringify({ code: localCode }) }, handleLogout);
       const data = await res.json();
-      setLocalOutput(res.ok ? data.deobfuscated : `Error: ${data.error}`);
+      if (res.ok) {
+        setLocalOutput(data.deobfuscated);
+        setLocalPatterns(data.patterns || []);
+      } else { setLocalOutput(`Error: ${data.error}`); }
     } catch (e) { setLocalOutput(`Request failed: ${e.message}`); }
     setRunningLocal(false);
   };
@@ -306,10 +310,16 @@ function LabPage({ obfuscated, setObfuscated, clean, setClean, pairs, setPairs,
         {runningLocal ? "Running…" : "Deobfuscate with Local Model"}
       </button>
       {localOutput && (
-        <div style={editorContainerStyle}>
-          <div style={{ color: "#aaa", fontSize: "0.8rem", marginBottom: "6px" }}>Local Model Output</div>
-          <Editor value={localOutput} onValueChange={setLocalOutput} highlight={highlight} padding={10} style={editorInnerStyle} />
-        </div>
+        <>
+          <div style={editorContainerStyle}>
+            <div style={{ color: "#aaa", fontSize: "0.8rem", marginBottom: "6px" }}>Local Model Output</div>
+            <Editor value={localOutput} onValueChange={setLocalOutput} highlight={highlight} padding={10} style={editorInnerStyle} />
+          </div>
+          <button className="deotter-btn" onClick={() => onAttribution(localCode, localPatterns)}
+            style={{ fontFamily: '"Fira Code", monospace', fontSize: "0.82rem" }}>
+            🎯 Attribute to Threat Actor
+          </button>
+        </>
       )}
 
       <div style={divider} />
@@ -354,6 +364,7 @@ function DeobfuscatePage({
   handleDeobfuscate, handleGenerateReport, handleAIDeobfuscate,
   showFeedback, handleGood, handleBad,
   usePairs, setUsePairs, pairsCount, theme, darkMode, logoOverride,
+  onAttribution, hasReport,
 }) {
   const highlight = (c) => Prism.highlight(c, Prism.languages.javascript, "javascript");
 
@@ -423,6 +434,140 @@ function DeobfuscatePage({
           </button>
         </div>
       )}
+
+      {hasReport && (
+        <div style={{ marginTop: "0.8rem" }}>
+          <button className="deotter-btn" onClick={onAttribution}
+            style={{ fontFamily: '"Fira Code", monospace', fontSize: "0.82rem" }}>
+            🎯 Attribute to Threat Actor
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ------------------------------
+// Attribution Modal
+// ------------------------------
+function AttributionModal({ token, theme, code, techniques, source, onClose, onUnauth }) {
+  const [actors, setActors] = useState([]);
+  const [matches, setMatches] = useState(null);
+  const [selectedActor, setSelectedActor] = useState("");
+  const [notes, setNotes] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [msg, setMsg] = useState({ text: "", ok: true });
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    Promise.all([
+      authFetch(token, `${API}/threat-actors`, {}, onUnauth).then(r => r.json()),
+      authFetch(token, `${API}/threat-actors/attribute`, {
+        method: "POST", body: JSON.stringify({ techniques }),
+      }, onUnauth).then(r => r.json()),
+    ]).then(([ad, md]) => {
+      setActors(ad.actors || []);
+      setMatches(md.matches || []);
+      setLoading(false);
+    }).catch(() => setLoading(false));
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const handleSave = async () => {
+    if (!selectedActor) { setMsg({ text: "Select a threat actor first.", ok: false }); return; }
+    setSaving(true); setMsg({ text: "", ok: true });
+    try {
+      const res = await authFetch(token, `${API}/threat-actors/${selectedActor}/samples`, {
+        method: "POST",
+        body: JSON.stringify({ code_snippet: code.slice(0, 1000), techniques, notes, source }),
+      }, onUnauth);
+      const data = await res.json();
+      setMsg({ text: data.message || data.error, ok: res.ok });
+    } catch { setMsg({ text: "Failed to save.", ok: false }); }
+    setSaving(false);
+  };
+
+  const fieldStyle = {
+    width: "100%", padding: "8px 14px", fontSize: "0.85rem",
+    fontFamily: '"Fira Code", monospace', borderRadius: "20px",
+    border: `1px solid ${theme.selectBorder}`, backgroundColor: theme.selectBg,
+    color: theme.selectColor, boxSizing: "border-box",
+  };
+  const labelStyle = { display: "block", fontSize: "0.75rem", color: theme.subtext, marginBottom: "4px", textTransform: "uppercase", letterSpacing: "0.06em" };
+
+  return (
+    <div onClick={e => { if (e.target === e.currentTarget) onClose(); }}
+      style={{ position: "fixed", inset: 0, zIndex: 4000, backgroundColor: "rgba(0,0,0,0.6)", display: "flex", alignItems: "center", justifyContent: "center", padding: "1rem" }}>
+      <div style={{ backgroundColor: theme.bg, border: `1px solid ${theme.selectBorder}`, borderRadius: "14px", padding: "1.8rem", width: "100%", maxWidth: "560px", maxHeight: "85vh", overflowY: "auto", fontFamily: '"Fira Code", monospace', color: theme.text, boxShadow: "0 8px 32px rgba(0,0,0,0.3)" }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "1.4rem" }}>
+          <h2 style={{ margin: 0, fontSize: "1.05rem" }}>Threat Actor Attribution</h2>
+          <button onClick={onClose} className="deotter-btn" style={{ padding: "4px 12px", margin: 0 }}>✕</button>
+        </div>
+
+        {/* Detected techniques */}
+        <div style={{ marginBottom: "1.2rem" }}>
+          <div style={labelStyle}>Detected Techniques</div>
+          {techniques.length === 0
+            ? <div style={{ fontSize: "0.82rem", color: theme.subtext }}>None detected.</div>
+            : <div style={{ display: "flex", flexWrap: "wrap", gap: "6px", marginTop: "4px" }}>
+                {techniques.map(t => (
+                  <span key={t} style={{ fontSize: "0.75rem", backgroundColor: theme.selectBg, border: `1px solid ${theme.selectBorder}`, borderRadius: "20px", padding: "2px 10px", color: theme.text }}>{t}</span>
+                ))}
+              </div>
+          }
+        </div>
+
+        {/* Auto-attribution results */}
+        <div style={{ marginBottom: "1.4rem" }}>
+          <div style={labelStyle}>Auto-Attribution Results</div>
+          {loading && <div style={{ fontSize: "0.82rem", color: theme.subtext }}>Loading…</div>}
+          {!loading && matches !== null && matches.length === 0 && (
+            <div style={{ fontSize: "0.82rem", color: theme.subtext }}>No matching threat actors found. Add samples to build attribution profiles.</div>
+          )}
+          {!loading && matches && matches.map(m => (
+            <div key={m.id} style={{ marginTop: "8px", padding: "10px 14px", backgroundColor: theme.selectBg, border: `1px solid ${theme.selectBorder}`, borderRadius: "10px" }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                <strong style={{ fontSize: "0.9rem" }}>{m.name}</strong>
+                <span style={{ fontSize: "0.8rem", color: m.score >= 60 ? "#dc3545" : m.score >= 30 ? "#f0ad4e" : "#28a745", fontWeight: "bold" }}>{m.score}% match</span>
+              </div>
+              {m.description && <div style={{ fontSize: "0.78rem", color: theme.subtext, marginTop: "3px" }}>{m.description}</div>}
+              <div style={{ marginTop: "6px" }}>
+                <div style={{ height: "4px", borderRadius: "2px", backgroundColor: theme.selectBorder }}>
+                  <div style={{ height: "4px", borderRadius: "2px", width: `${m.score}%`, backgroundColor: m.score >= 60 ? "#dc3545" : m.score >= 30 ? "#f0ad4e" : "#28a745", transition: "width 0.4s" }} />
+                </div>
+              </div>
+              {m.matching_techniques.length > 0 && (
+                <div style={{ fontSize: "0.75rem", color: theme.subtext, marginTop: "6px" }}>
+                  Matching: {m.matching_techniques.join(", ")}
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
+
+        {/* Save sample */}
+        <div style={{ borderTop: `1px solid ${theme.selectBorder}`, paddingTop: "1.2rem" }}>
+          <div style={labelStyle}>Save Sample to Threat Actor</div>
+          {actors.length === 0 ? (
+            <div style={{ fontSize: "0.82rem", color: theme.subtext }}>No threat actors defined. An admin must create them in the Admin Panel first.</div>
+          ) : (
+            <>
+              <select value={selectedActor} onChange={e => setSelectedActor(e.target.value)} style={{ ...fieldStyle, marginBottom: "0.6rem", cursor: "pointer" }}>
+                <option value="">— Select threat actor —</option>
+                {actors.map(a => <option key={a.id} value={a.id}>{a.name} ({a.sample_count} sample{a.sample_count !== 1 ? "s" : ""})</option>)}
+              </select>
+              <label style={labelStyle}>Notes (optional)</label>
+              <textarea value={notes} onChange={e => setNotes(e.target.value)} rows={2}
+                style={{ ...fieldStyle, borderRadius: "10px", resize: "vertical", marginBottom: "0.6rem" }}
+                placeholder="Campaign name, source, context…" />
+              <button className="deotter-btn" onClick={handleSave} disabled={saving || !selectedActor} style={{ margin: 0, width: "100%" }}>
+                {saving ? "Saving…" : "Save Sample"}
+              </button>
+              {msg.text && <p style={{ color: msg.ok ? "#28a745" : "#dc3545", fontSize: "0.82rem", margin: "0.4rem 0 0" }}>{msg.text}</p>}
+            </>
+          )}
+        </div>
+      </div>
     </div>
   );
 }
@@ -879,6 +1024,12 @@ function AdminPanel({ token, theme, onClose, onUnauth }) {
   const [actionMsg, setActionMsg] = useState("");
   const [modelPolicy, setModelPolicy] = useState({});
   const [policyMsg, setPolicyMsg] = useState("");
+  const [actors, setActors] = useState([]);
+  const [actorMsg, setActorMsg] = useState({ text: "", ok: true });
+  const [newActorName, setNewActorName] = useState("");
+  const [newActorDesc, setNewActorDesc] = useState("");
+  const [expandedActor, setExpandedActor] = useState(null);
+  const [actorSamples, setActorSamples] = useState({});
 
   const loadUsers = async () => {
     setLoading(true);
@@ -898,7 +1049,23 @@ function AdminPanel({ token, theme, onClose, onUnauth }) {
     } catch {}
   };
 
-  useEffect(() => { loadUsers(); loadPolicy(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  const loadActors = async () => {
+    try {
+      const res = await authFetch(token, `${API}/threat-actors`, {}, onUnauth);
+      const data = await res.json();
+      if (res.ok) setActors(data.actors || []);
+    } catch {}
+  };
+
+  const loadActorSamples = async (actorId) => {
+    try {
+      const res = await authFetch(token, `${API}/threat-actors/${actorId}/samples`, {}, onUnauth);
+      const data = await res.json();
+      if (res.ok) setActorSamples(prev => ({ ...prev, [actorId]: data.samples || [] }));
+    } catch {}
+  };
+
+  useEffect(() => { loadUsers(); loadPolicy(); loadActors(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const toggleModel = async (modelName) => {
     const isAllowed = modelPolicy[modelName] === "allowed";
@@ -1034,6 +1201,102 @@ function AdminPanel({ token, theme, onClose, onUnauth }) {
           <p style={{ color: theme.subtext, fontSize: "0.82rem", marginTop: "0.8rem" }}>{policyMsg}</p>
         )}
       </div>
+
+      {/* ── Threat Actors ── */}
+      <div style={{ marginTop: "1.8rem", borderTop: `1px solid ${theme.selectBorder}`, paddingTop: "1.4rem" }}>
+        <h3 style={{ margin: "0 0 1rem", fontSize: "0.9rem", textTransform: "uppercase", letterSpacing: "0.06em" }}>Threat Actors</h3>
+
+        {/* Create new actor (admin only) */}
+        <div style={{ display: "flex", gap: "8px", flexWrap: "wrap", marginBottom: "1rem" }}>
+          <input
+            value={newActorName} onChange={e => setNewActorName(e.target.value)}
+            placeholder="Name (e.g. APT28)"
+            style={{ flex: "1 1 140px", padding: "7px 14px", fontSize: "0.82rem", fontFamily: '"Fira Code", monospace', borderRadius: "20px", border: `1px solid ${theme.selectBorder}`, backgroundColor: theme.selectBg, color: theme.selectColor }}
+          />
+          <input
+            value={newActorDesc} onChange={e => setNewActorDesc(e.target.value)}
+            placeholder="Description (optional)"
+            style={{ flex: "2 1 200px", padding: "7px 14px", fontSize: "0.82rem", fontFamily: '"Fira Code", monospace', borderRadius: "20px", border: `1px solid ${theme.selectBorder}`, backgroundColor: theme.selectBg, color: theme.selectColor }}
+          />
+          <button className="deotter-btn" style={{ margin: 0 }} disabled={!newActorName.trim()} onClick={async () => {
+            setActorMsg({ text: "", ok: true });
+            try {
+              const res = await authFetch(token, `${API}/threat-actors`, {
+                method: "POST", body: JSON.stringify({ name: newActorName, description: newActorDesc }),
+              }, onUnauth);
+              const data = await res.json();
+              setActorMsg({ text: data.message || data.error, ok: res.ok });
+              if (res.ok) { setNewActorName(""); setNewActorDesc(""); loadActors(); }
+            } catch { setActorMsg({ text: "Failed.", ok: false }); }
+          }}>+ Add Actor</button>
+        </div>
+        {actorMsg.text && <p style={{ color: actorMsg.ok ? "#28a745" : "#dc3545", fontSize: "0.82rem", margin: "0 0 0.8rem" }}>{actorMsg.text}</p>}
+
+        {actors.length === 0 ? (
+          <div style={{ fontSize: "0.82rem", color: theme.subtext }}>No threat actors defined yet.</div>
+        ) : actors.map(a => (
+          <div key={a.id} style={{ marginBottom: "0.6rem", border: `1px solid ${theme.selectBorder}`, borderRadius: "10px", overflow: "hidden" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "8px 14px", backgroundColor: theme.selectBg }}>
+              <div>
+                <strong style={{ fontSize: "0.88rem" }}>{a.name}</strong>
+                {a.description && <span style={{ fontSize: "0.78rem", color: theme.subtext, marginLeft: "10px" }}>{a.description}</span>}
+                <span style={{ fontSize: "0.75rem", color: theme.subtext, marginLeft: "10px" }}>{a.sample_count} sample{a.sample_count !== 1 ? "s" : ""}</span>
+              </div>
+              <div style={{ display: "flex", gap: "6px" }}>
+                <button className="deotter-btn" style={{ margin: 0, padding: "3px 10px", fontSize: "0.75rem" }}
+                  onClick={() => {
+                    if (expandedActor === a.id) { setExpandedActor(null); } else {
+                      setExpandedActor(a.id);
+                      loadActorSamples(a.id);
+                    }
+                  }}>
+                  {expandedActor === a.id ? "Hide" : "Samples"}
+                </button>
+                <button className="deotter-btn" style={{ margin: 0, padding: "3px 10px", fontSize: "0.75rem", color: "#dc3545", borderColor: "#dc3545" }}
+                  onClick={async () => {
+                    if (!window.confirm(`Delete threat actor "${a.name}" and all its samples?`)) return;
+                    const res = await authFetch(token, `${API}/threat-actors/${a.id}`, { method: "DELETE" }, onUnauth);
+                    const data = await res.json();
+                    setActorMsg({ text: data.message || data.error, ok: res.ok });
+                    if (res.ok) { loadActors(); if (expandedActor === a.id) setExpandedActor(null); }
+                  }}>Delete</button>
+              </div>
+            </div>
+
+            {expandedActor === a.id && (
+              <div style={{ padding: "10px 14px" }}>
+                {!(actorSamples[a.id]) && <div style={{ fontSize: "0.78rem", color: theme.subtext }}>Loading…</div>}
+                {actorSamples[a.id] && actorSamples[a.id].length === 0 && (
+                  <div style={{ fontSize: "0.78rem", color: theme.subtext }}>No samples yet.</div>
+                )}
+                {actorSamples[a.id] && actorSamples[a.id].map(s => {
+                  const techs = (() => { try { return JSON.parse(s.techniques); } catch { return []; } })();
+                  return (
+                    <div key={s.id} style={{ marginBottom: "6px", padding: "8px 12px", backgroundColor: theme.bg, border: `1px solid ${theme.selectBorder}`, borderRadius: "8px", fontSize: "0.78rem" }}>
+                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
+                        <div>
+                          <span style={{ color: theme.subtext }}>{s.source} · {s.created_by} · {s.created_at.slice(0, 10)}</span>
+                          {s.notes && <div style={{ color: theme.text, marginTop: "2px" }}>{s.notes}</div>}
+                          {techs.length > 0 && <div style={{ color: theme.subtext, marginTop: "2px" }}>Techniques: {techs.join(", ")}</div>}
+                          {s.code_snippet && <div style={{ color: theme.subtext, marginTop: "2px", fontStyle: "italic" }}>{s.code_snippet.slice(0, 80)}…</div>}
+                        </div>
+                        <button className="deotter-btn" style={{ margin: 0, padding: "2px 8px", fontSize: "0.72rem", color: "#dc3545", borderColor: "#dc3545", flexShrink: 0, marginLeft: "8px" }}
+                          onClick={async () => {
+                            const res = await authFetch(token, `${API}/threat-actors/samples/${s.id}`, { method: "DELETE" }, onUnauth);
+                            const data = await res.json();
+                            setActorMsg({ text: data.message || data.error, ok: res.ok });
+                            if (res.ok) { loadActorSamples(a.id); loadActors(); }
+                          }}>✕</button>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        ))}
+      </div>
+
     </div>
   );
 }
@@ -1261,6 +1524,8 @@ function App() {
   const [usePairs, setUsePairs] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
   const [showAdminPanel, setShowAdminPanel] = useState(false);
+  const [attribution, setAttribution] = useState(null); // {code, techniques, source} | null
+  const [lastPatterns, setLastPatterns] = useState([]);
   const [showInstructions, setShowInstructions] = useState(false);
   const [logoOverride, setLogoOverride] = useState("");
   const [showWelcome, setShowWelcome] = useState(false);
@@ -1322,7 +1587,10 @@ function App() {
     try {
       const res = await authFetch(token, `${API}/generate-report`, { method: "POST", body: JSON.stringify({ code }) }, handleLogout);
       const data = await res.json();
-      setReport(res.ok ? data.report : `Error: ${data.error}`);
+      if (res.ok) {
+        setReport(data.report);
+        setLastPatterns(data.patterns || []);
+      } else { setReport(`Error: ${data.error}`); }
     } catch (err) { setReport(`Request failed: ${err.message}`); }
   };
 
@@ -1333,6 +1601,7 @@ function App() {
       const data = await res.json();
       if (res.ok) {
         setLastAICode(code); setLastAIOutput(data.deobfuscated); setLastAIPatterns(data.patterns || []);
+        setLastPatterns(data.patterns || []);
         setReport(data.deobfuscated); setShowFeedback(true);
       } else { setReport(`Error: ${data.error}`); }
     } catch (err) { setReport(`Request failed: ${err.message}`); }
@@ -1351,6 +1620,7 @@ function App() {
         const patternNote = data.patterns?.length > 0 ? `Detected: ${data.patterns.join(", ")}` : "No specific patterns detected";
         const exampleNote = data.examples_used > 0 ? `${data.examples_used} matching training example(s) used` : "no training examples used";
         setReport(`${data.deobfuscated}\n\n--- [${patternNote} | ${exampleNote}] ---`);
+        setLastPatterns(data.patterns || []);
         setShowFeedback(true);
       } else { setReport(`Error: ${data.error}`); }
     } catch (err) { setReport(`Request failed: ${err.message}`); }
@@ -1454,6 +1724,14 @@ function App() {
         <WelcomeBanner username={currentUser.username} theme={theme} onDismiss={() => setShowWelcome(false)} />
       )}
 
+      {attribution && (
+        <AttributionModal
+          token={token} theme={theme}
+          code={attribution.code} techniques={attribution.techniques} source={attribution.source}
+          onClose={() => setAttribution(null)} onUnauth={handleLogout}
+        />
+      )}
+
       {tab === "deobfuscate" ? (
         <DeobfuscatePage
           code={code} setCode={setCode} report={report} setReport={setReport}
@@ -1462,6 +1740,8 @@ function App() {
           showFeedback={showFeedback} handleGood={handleGood} handleBad={handleBad}
           usePairs={usePairs} setUsePairs={setUsePairs} pairsCount={trainPairs.length}
           theme={theme} darkMode={darkMode} logoOverride={logoOverride}
+          onAttribution={() => setAttribution({ code, techniques: lastPatterns, source: "report" })}
+          hasReport={!!report}
         />
       ) : (
         <LabPage
@@ -1471,6 +1751,7 @@ function App() {
           availableModels={availableModels}
           selectedModel={selectedModel} setSelectedModel={setSelectedModel}
           token={token} theme={theme} handleLogout={handleLogout}
+          onAttribution={(lmiCode, patterns) => setAttribution({ code: lmiCode, techniques: patterns, source: "lmi" })}
         />
       )}
 

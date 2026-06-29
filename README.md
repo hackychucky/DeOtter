@@ -25,6 +25,8 @@
 | **Admin panel** | Approve users, change roles, view usage stats |
 | **Password pepper** | Server-side secret appended before hashing, configurable in Settings |
 | **Custom logo** | Upload a custom logo via Settings (admin only) |
+| **Threat actor attribution** | Link code samples to known threat actors; auto-attribute by technique similarity |
+| **IOC extraction** | Obfuscation report extracts IPs, URLs, domains, file paths, registry keys, hashes |
 
 ---
 
@@ -238,6 +240,67 @@ export AZURE_FOUNDRY_API_KEY=your-azure-key
 export DEOTTER_SECRET=change-this
 cd ../frontend && npm install && npm start
 ```
+
+---
+
+## Threat Actor Attribution
+
+DeOtter can attribute obfuscated code to known threat actors based on the obfuscation techniques detected.
+
+### Setup
+
+1. Open the **Admin Panel** (gear icon → Admin Panel → Threat Actors section).
+2. Create threat actor profiles — name (e.g. `APT28`) and optional description.
+3. Analysts run a report or LMI analysis, then click **🎯 Attribute to Threat Actor** and save the sample to the matching actor.
+
+### How attribution works
+
+Each saved sample stores the list of detected techniques (hex encoding, control flow obfuscation, etc.). When you click **🎯 Attribute** on a new piece of code, DeOtter scores every threat actor using **Jaccard similarity** between the current code's techniques and the union of techniques across all saved samples for that actor.
+
+| Confidence | Meaning |
+|---|---|
+| ≥ 60% (red) | Strong technique overlap |
+| 30–59% (orange) | Partial overlap |
+| < 30% (green) | Weak or incidental match |
+
+### Workflow
+
+```
+1. Analyst pastes obfuscated JS → Create Obfuscation Report (or LMI)
+2. Click 🎯 Attribute to Threat Actor
+3. See ranked matches with confidence bars
+4. Select the correct actor, add notes (campaign name, source, etc.), Save Sample
+5. Over time, the attribution engine improves as more samples are added
+```
+
+### Storage
+
+Samples are stored in `users.db` (`threat_actors` and `threat_actor_samples` tables). Each sample stores:
+- First 1000 characters of the code snippet
+- Detected technique list (JSON array)
+- Free-text notes
+- Source (`report` or `lmi`)
+- Submitter username and timestamp
+
+---
+
+## IOC Extraction
+
+The **Create Obfuscation Report** button now automatically extracts Indicators of Compromise from the code. The engine first deobfuscates hex/unicode/base64 encoding, then scans the decoded text for:
+
+| Category | Examples |
+|---|---|
+| IP addresses | `192.168.1.100`, `10.0.0.1` |
+| URLs | `https://evil.example.com/payload.php` |
+| Domains | `evil.ru`, `c2.xyz` (inside string literals only) |
+| Email addresses | `attacker@domain.com` |
+| Windows paths | `C:\Users\...\payload.exe`, `%APPDATA%\...` |
+| Unix paths | `/etc/cron.d/...`, `/tmp/...` |
+| Suspicious filenames | `.exe`, `.dll`, `.ps1`, `.bat`, `.hta`, `.vbs`, etc. (in string literals) |
+| Registry keys | `HKCU\Software\Microsoft\Windows\CurrentVersion\Run` |
+| Hashes | MD5 (32 hex), SHA1 (40 hex), SHA256 (64 hex) — in string literals |
+
+IOCs appear at the bottom of every obfuscation report under a `==` separator.
 
 ---
 

@@ -20,6 +20,7 @@ from deotter import (
     find_minification,
     find_dynamic_code_generation,
     find_string_concatenation,
+    find_iocs,
 )
 import subprocess
 import os
@@ -126,9 +127,10 @@ def gen_report_endpoint():
     #return jsonify({'report': f"Received code with length: {len(code)}"})
 
     report = gen_report_from_code(code)
+    patterns = detect_patterns(code)
     from db import increment_submissions
     increment_submissions(request.current_user["sub"])
-    return jsonify({'report': report})
+    return jsonify({'report': report, 'patterns': patterns})
 
 
 # ------------------------------
@@ -139,11 +141,14 @@ def gen_report_endpoint():
 def deobfuscate_endpoint():
     data = request.get_json()
     code = data.get('code', '')
-    detected_patterns = detect_patterns(code)
-    result = deobfuscate_code(code)
-    from db import increment_submissions
-    increment_submissions(request.current_user["sub"])
-    return jsonify({"deobfuscated": result, "patterns": detected_patterns})
+    try:
+        detected_patterns = detect_patterns(code)
+        result = deobfuscate_code(code)
+        from db import increment_submissions
+        increment_submissions(request.current_user["sub"])
+        return jsonify({"deobfuscated": result, "patterns": detected_patterns})
+    except Exception as e:
+        return jsonify({"error": f"Deobfuscation failed: {str(e)}"}), 500
 
 
 
@@ -222,7 +227,7 @@ def local_deobfuscate():
         from db import increment_submissions
         increment_submissions(request.current_user["sub"])
 
-        return jsonify({"deobfuscated": generated.strip(), "model": LOADED_MODEL_NAME})
+        return jsonify({"deobfuscated": generated.strip(), "model": LOADED_MODEL_NAME, "patterns": detect_patterns(code)})
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
@@ -606,6 +611,132 @@ def save_model_policy():
 def leaderboard():
     from db import get_top_users
     return jsonify({"top": get_top_users(3)})
+
+
+# ------------------------------
+# THREAT ACTOR ATTRIBUTION
+# ------------------------------
+
+def _attribution_score(techniques_input, samples):
+    actor_techniques = {}
+    actor_info = {}
+    for s in samples:
+        aid = s['threat_actor_id']
+        techs = set(json.loads(s['techniques'] or '[]'))
+        if aid not in actor_techniques:
+            actor_techniques[aid] = set()
+            actor_info[aid] = {
+                'id': aid,
+                'name': s['actor_name'],
+                'description': s.get('actor_description', ''),
+                'sample_count': 0,
+            }
+        actor_techniques[aid] |= techs
+        actor_info[aid]['sample_count'] += 1
+    input_set = set(techniques_input)
+    results = []
+    for aid, techs in actor_techniques.items():
+        union = input_set | techs
+        score = len(input_set & techs) / len(union) if union else 0
+        if score > 0:
+            results.append({
+                **actor_info[aid],
+                'score': round(score * 100),
+                'matching_techniques': sorted(input_set & techs),
+            })
+    return sorted(results, key=lambda x: x['score'], reverse=True)[:5]
+
+
+@app.route('/threat-actors', methods=['GET'])
+@require_auth
+def list_actors_endpoint():
+    from db import list_threat_actors
+    return jsonify({'actors': list_threat_actors()})
+
+
+@app.route('/threat-actors', methods=['POST'])
+@require_auth
+def create_actor_endpoint():
+    if request.current_user.get('role') != 'admin':
+        return jsonify({'error': 'Admin access required'}), 403
+    data = request.get_json() or {}
+    name = data.get('name', '').strip()
+    if not name:
+        return jsonify({'error': 'Name is required'}), 400
+    from db import create_threat_actor
+    ok, err = create_threat_actor(name, data.get('description', ''), request.current_user['sub'])
+    if not ok:
+        return jsonify({'error': err}), 409
+    return jsonify({'message': f"Threat actor '{name}' created."})
+
+
+@app.route('/threat-actors/<int:actor_id>', methods=['PUT'])
+@require_auth
+def update_actor_endpoint(actor_id):
+    if request.current_user.get('role') != 'admin':
+        return jsonify({'error': 'Admin access required'}), 403
+    data = request.get_json() or {}
+    from db import update_threat_actor
+    ok = update_threat_actor(actor_id, data.get('name', ''), data.get('description', ''))
+    if not ok:
+        return jsonify({'error': 'Threat actor not found'}), 404
+    return jsonify({'message': 'Updated.'})
+
+
+@app.route('/threat-actors/<int:actor_id>', methods=['DELETE'])
+@require_auth
+def delete_actor_endpoint(actor_id):
+    if request.current_user.get('role') != 'admin':
+        return jsonify({'error': 'Admin access required'}), 403
+    from db import delete_threat_actor
+    ok = delete_threat_actor(actor_id)
+    if not ok:
+        return jsonify({'error': 'Not found'}), 404
+    return jsonify({'message': 'Threat actor deleted.'})
+
+
+@app.route('/threat-actors/<int:actor_id>/samples', methods=['GET'])
+@require_auth
+def get_samples_endpoint(actor_id):
+    from db import get_threat_actor_samples
+    return jsonify({'samples': get_threat_actor_samples(actor_id)})
+
+
+@app.route('/threat-actors/<int:actor_id>/samples', methods=['POST'])
+@require_auth
+def add_sample_endpoint(actor_id):
+    data = request.get_json() or {}
+    from db import add_threat_actor_sample
+    add_threat_actor_sample(
+        actor_id,
+        data.get('code_snippet', ''),
+        data.get('techniques', []),
+        data.get('notes', ''),
+        data.get('source', 'report'),
+        request.current_user['sub'],
+    )
+    return jsonify({'message': 'Sample saved.'})
+
+
+@app.route('/threat-actors/samples/<int:sample_id>', methods=['DELETE'])
+@require_auth
+def delete_sample_endpoint_ta(sample_id):
+    from db import delete_threat_actor_sample
+    ok = delete_threat_actor_sample(sample_id)
+    if not ok:
+        return jsonify({'error': 'Sample not found'}), 404
+    return jsonify({'message': 'Sample deleted.'})
+
+
+@app.route('/threat-actors/attribute', methods=['POST'])
+@require_auth
+def attribute_endpoint():
+    data = request.get_json() or {}
+    techniques = data.get('techniques', [])
+    from db import get_all_samples_for_attribution
+    samples = get_all_samples_for_attribution()
+    matches = _attribution_score(techniques, samples)
+    return jsonify({'matches': matches})
 
 
 if __name__ == '__main__':

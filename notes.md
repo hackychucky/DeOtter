@@ -80,6 +80,32 @@ CREATE TABLE settings (
 
 Migrations run at startup in `init_db()` using `ALTER TABLE ... ADD COLUMN` in a try/except (safe to re-run).
 
+### New tables (threat actor attribution)
+
+```sql
+CREATE TABLE threat_actors (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    name        TEXT UNIQUE NOT NULL,
+    description TEXT NOT NULL DEFAULT '',
+    created_by  TEXT NOT NULL DEFAULT '',
+    created_at  TEXT NOT NULL DEFAULT ''
+);
+
+CREATE TABLE threat_actor_samples (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    threat_actor_id INTEGER NOT NULL,
+    code_snippet    TEXT NOT NULL DEFAULT '',   -- first 1000 chars
+    techniques      TEXT NOT NULL DEFAULT '[]', -- JSON array
+    notes           TEXT NOT NULL DEFAULT '',
+    source          TEXT NOT NULL DEFAULT 'report', -- 'report' | 'lmi'
+    created_by      TEXT NOT NULL DEFAULT '',
+    created_at      TEXT NOT NULL DEFAULT '',
+    FOREIGN KEY (threat_actor_id) REFERENCES threat_actors(id) ON DELETE CASCADE
+);
+```
+
+Tables are created automatically in `init_db()` alongside the existing tables.
+
 ### Settings keys used
 
 | Key | Value |
@@ -93,6 +119,7 @@ Migrations run at startup in `init_db()` using `ALTER TABLE ... ADD COLUMN` in a
 | `openai_key` | OpenAI API key |
 | `openai_model` | OpenAI model name (default: `gpt-4o`) |
 | `logo_override` | Filename of custom logo in `frontend/public/` |
+| `model_policy` | JSON object: `{ "ModelName": "allowed" }` |
 
 ---
 
